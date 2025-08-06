@@ -1,0 +1,100 @@
+"""
+Репозиторий для работы с пользователями через PostgreSQL (Neon)
+"""
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import select, insert, update
+from typing import Dict, Any, Optional
+from core.interfaces import DatabaseInterface
+from sqlalchemy import Column, Integer, Boolean, DateTime, String
+from sqlalchemy.ext.declarative import declarative_base
+from datetime import datetime
+
+Base = declarative_base()
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_premium = Column(Boolean, default=False)
+
+class UserRepository(DatabaseInterface):
+    """Репозиторий для управления пользователями через PostgreSQL"""
+
+    def __init__(self, database_url: str):
+        self.database_url = database_url
+        self.engine = create_async_engine(
+            database_url,
+            pool_size=10,
+            max_overflow=20,
+            pool_pre_ping=True
+        )
+        self.async_session = sessionmaker(
+            self.engine,
+            class_=AsyncSession,
+            expire_on_commit=False
+        )
+
+    async def create_tables(self) -> None:
+        """Создание таблиц в базе данных"""
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    async def add_user(self, user_id: int) -> bool:
+        """Добавление пользователя в базу данных"""
+        async with self.async_session() as session:
+            try:
+                stmt = insert(User).values(user_id=user_id)
+                await session.execute(stmt)
+                await session.commit()
+                return True
+            except Exception:
+                await session.rollback()
+                return False
+
+    async def get_user(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Получение пользователя по ID"""
+        async with self.async_session() as session:
+            stmt = select(User).where(User.user_id == user_id)
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+            if user:
+                return {
+                    "id": user.id,
+                    "user_id": user.user_id,
+                    "created_at": user.created_at,
+                    "is_premium": user.is_premium
+                }
+            return None
+
+    async def user_exists(self, user_id: int) -> bool:
+        """Проверка существования пользователя"""
+        async with self.async_session() as session:
+            stmt = select(User).where(User.user_id == user_id)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none() is not None
+
+    async def get_premium_users(self) -> list:
+        """Получение всех премиум пользователей"""
+        async with self.async_session() as session:
+            stmt = select(User.user_id).where(User.is_premium == True)
+            result = await session.execute(stmt)
+            return [row[0] for row in result.fetchall()]
+
+    async def set_premium_status(self, user_id: int, premium: bool = True) -> bool:
+        """Установка премиум статуса пользователю"""
+        async with self.async_session() as session:
+            try:
+                stmt = (
+                    update(User)
+                    .where(User.user_id == user_id)
+                    .values(is_premium=premium)
+                )
+                result = await session.execute(stmt)
+                await session.commit()
+                return result.rowcount > 0
+            except Exception:
+                await session.rollback()
+                return False
