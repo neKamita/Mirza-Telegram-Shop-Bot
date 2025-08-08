@@ -20,8 +20,15 @@ class MessageHandler(EventHandlerInterface):
 
     async def handle_message(self, message: Message, bot: Bot) -> None:
         """Обработка текстового сообщения"""
-        # Все пользователи имеют доступ к функциям бота
-        await message.answer("✅ Ваше сообщение получено. Спасибо за использование бота!")
+        # Проверяем, является ли сообщение числом для покупки звезд
+        if message.text and message.text.isdigit():
+            amount = int(message.text)
+            if 1 <= amount <= 10000:  # Ограничиваем разумными пределами
+                await self._create_star_purchase_custom(message, bot, amount)
+            else:
+                await message.answer("❌ Пожалуйста, введите сумму от 1 до 10000 звезд")
+        else:
+            await message.answer("✅ Ваше сообщение получено. Спасибо за использование бота!")
 
     async def handle_callback(self, callback: CallbackQuery, bot: Bot) -> None:
         """Обработка callback запросов"""
@@ -210,32 +217,49 @@ class MessageHandler(EventHandlerInterface):
         """Создание покупки звезд через Heleket"""
         user_id = callback.from_user.id
 
-        # Используем существующий метод create_invoice_for_user
-        invoice = await self.payment_service.create_invoice_for_user(user_id)
+        try:
+            # Используем метод create_invoice_for_user с указанием суммы
+            invoice = await self.payment_service.create_invoice_for_user(user_id, str(amount))
 
-        if "error" in invoice:
-            await callback.message.answer("Ошибка при создании счета. Пожалуйста, попробуйте позже.")
-            return
+            # Проверяем наличие ошибок в ответе
+            if "error" in invoice or "status" in invoice and invoice["status"] == "failed":
+                error_msg = invoice.get("error", "Неизвестная ошибка")
+                await callback.message.answer(f"❌ Ошибка при создании счета: {error_msg}")
+                return
 
-        builder = InlineKeyboardBuilder()
-        builder.row(
-            InlineKeyboardButton(
-                text="🔍 Проверить оплату",
-                callback_data=f"check_payment_{invoice['result']['uuid']}"
+            # Проверяем структуру ответа
+            if "result" not in invoice:
+                await callback.message.answer("❌ Ошибка: некорректный ответ от платежной системы")
+                return
+
+            result = invoice["result"]
+            if "uuid" not in result or "url" not in result:
+                await callback.message.answer("❌ Ошибка: неполные данные в ответе от платежной системы")
+                return
+
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(
+                    text="🔍 Проверить оплату",
+                    callback_data=f"check_payment_{result['uuid']}"
+                )
             )
-        )
-        builder.row(
-            InlineKeyboardButton(
-                text="⬅️ Назад",
-                callback_data="back_to_buy_stars"
+            builder.row(
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="back_to_buy_stars"
+                )
             )
-        )
 
-        await callback.message.answer(
-            f"Создан счет на покупку {amount} звезд.\n\n"
-            f"Ссылка на оплату: {invoice['result']['url']}",
-            reply_markup=builder.as_markup()
-        )
+            await callback.message.answer(
+                f"✅ Создан счет на покупку {amount} звезд.\n\n"
+                f"💳 Ссылка на оплату: {result['url']}\n\n"
+                f"📋 ID счета: {result['uuid']}",
+                reply_markup=builder.as_markup()
+            )
+
+        except Exception as e:
+            await callback.message.answer(f"❌ Произошла ошибка: {str(e)}")
 
     async def _show_help(self, callback: CallbackQuery, bot: Bot) -> None:
         """Отображение экрана помощи"""
@@ -275,3 +299,51 @@ class MessageHandler(EventHandlerInterface):
         """Возврат к экрану помощи"""
         await callback.answer()
         await self._show_help(callback, bot)
+
+    async def _create_star_purchase_custom(self, message: Message, bot: Bot, amount: int) -> None:
+        """Создание покупки звезд для пользовательской суммы"""
+        user_id = message.from_user.id
+
+        try:
+            # Используем метод create_invoice_for_user с указанием суммы
+            invoice = await self.payment_service.create_invoice_for_user(user_id, str(amount))
+
+            # Проверяем наличие ошибок в ответе
+            if "error" in invoice or "status" in invoice and invoice["status"] == "failed":
+                error_msg = invoice.get("error", "Неизвестная ошибка")
+                await message.answer(f"❌ Ошибка при создании счета: {error_msg}")
+                return
+
+            # Проверяем структуру ответа
+            if "result" not in invoice:
+                await message.answer("❌ Ошибка: некорректный ответ от платежной системы")
+                return
+
+            result = invoice["result"]
+            if "uuid" not in result or "url" not in result:
+                await message.answer("❌ Ошибка: неполные данные в ответе от платежной системы")
+                return
+
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(
+                    text="🔍 Проверить оплату",
+                    callback_data=f"check_payment_{result['uuid']}"
+                )
+            )
+            builder.row(
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="back_to_buy_stars"
+                )
+            )
+
+            await message.answer(
+                f"✅ Создан счет на покупку {amount} звезд.\n\n"
+                f"💳 Ссылка на оплату: {result['url']}\n\n"
+                f"📋 ID счета: {result['uuid']}",
+                reply_markup=builder.as_markup()
+            )
+
+        except Exception as e:
+            await message.answer(f"❌ Произошла ошибка: {str(e)}")

@@ -48,6 +48,7 @@ async def main():
 
     # Инициализация базы данных
     await init_database()
+    logging.info("Database initialized successfully")
 
     # Запуск бота
     await bot(DeleteWebhook(drop_pending_updates=True))

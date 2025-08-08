@@ -17,7 +17,23 @@ class Settings:
         self.api_key: str = os.getenv("API_KEY", "")
 
         # Database - Neon PostgreSQL
-        self.database_url: str = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/telegram_bot")
+        database_url = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/telegram_bot")
+        # Заменяем 'postgresql://' на 'postgresql+asyncpg://' для asyncpg драйвера
+        if database_url.startswith("postgresql://"):
+            database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        # Обработка SSL параметров для asyncpg
+        if "localhost" in database_url or "127.0.0.1" in database_url:
+            # Убираем sslmode для локальной разработки
+            database_url = database_url.replace("?sslmode=require", "")
+            database_url = database_url.replace("&sslmode=require", "")
+            database_url = database_url.replace("sslmode=require", "")
+        else:
+            # Для production (Neon) используем ssl=true вместо sslmode
+            if "sslmode=require" in database_url:
+                database_url = database_url.replace("sslmode=require", "ssl=true")
+
+        self.database_url: str = database_url
         self.database_pool_size: int = int(os.getenv("DATABASE_POOL_SIZE", "10"))
         self.database_max_overflow: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "20"))
 

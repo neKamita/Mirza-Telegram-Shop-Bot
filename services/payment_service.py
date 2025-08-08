@@ -67,11 +67,11 @@ class PaymentService(PaymentInterface):
         except Exception as e:
             return {"error": str(e), "status": "failed"}
 
-    async def create_invoice_for_user(self, user_id: int) -> Dict[str, Any]:
+    async def create_invoice_for_user(self, user_id: int, amount: str = "1") -> Dict[str, Any]:
         """Создание счета для конкретного пользователя"""
         order_id = f"subscription-{user_id}-{int(__import__('time').time())}"
         return await self.create_invoice(
-            amount="1",
+            amount=amount,
             currency="TON",
             order_id=order_id
         )
