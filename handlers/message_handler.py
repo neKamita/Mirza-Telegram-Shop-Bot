@@ -20,80 +20,44 @@ class MessageHandler(EventHandlerInterface):
 
     async def handle_message(self, message: Message, bot: Bot) -> None:
         """Обработка текстового сообщения"""
-        user_id = message.from_user.id
-
-        # Проверка, является ли пользователь премиум
-        is_premium = await self.user_repository.user_exists(user_id)
-
-        if not is_premium:
-            await self._send_payment_request(message, bot)
-            return
-
-        # Подтверждение получения сообщения для премиум пользователей
+        # Все пользователи имеют доступ к функциям бота
         await message.answer("✅ Ваше сообщение получено. Спасибо за использование бота!")
 
     async def handle_callback(self, callback: CallbackQuery, bot: Bot) -> None:
         """Обработка callback запросов"""
         callback_data = callback.data
 
-        if callback_data == "create_invoice":
-            await self._create_invoice_callback(callback, bot)
-        elif callback_data.startswith("check_invoice_"):
-            await self._check_payment_callback(callback, bot)
+        if callback_data == "balance":
+            await self._show_balance(callback, bot)
+        elif callback_data == "recharge":
+            await self._handle_recharge(callback, bot)
+        elif callback_data == "back_to_main":
+            await self._back_to_main(callback, bot)
+        elif callback_data == "back_to_balance":
+            await self._back_to_balance(callback, bot)
+        elif callback_data == "recharge_heleket":
+            await self._handle_recharge(callback, bot)
+        elif callback_data == "buy_stars":
+            await self._show_buy_stars(callback, bot)
+        elif callback_data == "custom_amount":
+            await self._show_custom_amount(callback, bot)
+        elif callback_data == "back_to_buy_stars":
+            await self._back_to_buy_stars(callback, bot)
+        elif callback_data == "buy_100":
+            await self._buy_stars_100(callback, bot)
+        elif callback_data == "buy_250":
+            await self._buy_stars_250(callback, bot)
+        elif callback_data == "buy_500":
+            await self._buy_stars_500(callback, bot)
+        elif callback_data == "buy_1000":
+            await self._buy_stars_1000(callback, bot)
+        elif callback_data == "help":
+            await self._show_help(callback, bot)
+        elif callback_data == "create_ticket":
+            await self._create_ticket(callback, bot)
+        elif callback_data == "back_to_help":
+            await self._back_to_help(callback, bot)
 
-    async def _send_payment_request(self, message: Message, bot: Bot) -> None:
-        """Отправка запроса на оплату"""
-        builder = InlineKeyboardBuilder()
-        button = InlineKeyboardButton(text="🛒 Оплатить", callback_data="create_invoice")
-        builder.row(button)
-
-        await message.answer(
-            '📰 Чтобы пользоваться ботом необходимо оплатить подписку. \n\n'
-            'Для оплаты доступа, используйте кнопку ниже.',
-            parse_mode='HTML',
-            reply_markup=builder.as_markup()
-        )
-
-    async def _create_invoice_callback(self, callback: CallbackQuery, bot: Bot) -> None:
-        """Обработка создания счета"""
-        await callback.answer()
-
-        user_id = callback.from_user.id
-        invoice = await self.payment_service.create_invoice_for_user(user_id)
-
-        if "error" in invoice:
-            await callback.message.answer("Ошибка при создании счета. Пожалуйста, попробуйте позже.")
-            return
-
-        builder = InlineKeyboardBuilder()
-        button = InlineKeyboardButton(
-            text="🔎 Проверить оплату",
-            callback_data=f"check_invoice_{invoice['result']['uuid']}"
-        )
-        builder.row(button)
-
-        await callback.message.answer(
-            f"Ссылка на оплату: {invoice['result']['url']}",
-            parse_mode='HTML',
-            reply_markup=builder.as_markup()
-        )
-
-    async def _check_payment_callback(self, callback: CallbackQuery, bot: Bot) -> None:
-        """Обработка проверки оплаты"""
-        await callback.answer()
-
-        invoice_uuid = callback.data.split("_")[2]
-        payment_info = await self.payment_service.check_payment(invoice_uuid)
-
-        if payment_info.get("result", {}).get("status") == "paid":
-            user_id = callback.from_user.id
-
-            # Добавляем пользователя в базу данных
-            await self.user_repository.add_user(user_id)
-
-            await callback.message.answer("✅ Оплачено! Теперь вы можете использовать все функции бота.")
-        else:
-            await callback.message.answer("❌ Счет не был оплачен. Пожалуйста, повторите позже.")
 
     def register_handlers(self, dp: Dispatcher) -> None:
         """Регистрация обработчиков"""
@@ -109,12 +73,205 @@ class MessageHandler(EventHandlerInterface):
     async def cmd_start(self, message: Message) -> None:
         """Обработка команды /start"""
         builder = InlineKeyboardBuilder()
-        button = InlineKeyboardButton(text="🛒 Оплатить", callback_data="create_invoice")
-        builder.row(button)
+        builder.row(
+            InlineKeyboardButton(text="1-Баланс", callback_data="balance"),
+            InlineKeyboardButton(text="2-Покупка Звезд", callback_data="buy_stars"),
+            InlineKeyboardButton(text="3-Помощь", callback_data="help")
+        )
 
         await message.answer(
-            '📰 Чтобы пользоваться ботом необходимо оплатить подписку. \n\n'
-            'Для оплаты доступа, используйте кнопку ниже.',
-            parse_mode='HTML',
+            "🌟 Добро пожаловать в наш бот!\n\n"
+            "Выберите действие:\n"
+            "1-Баланс\n"
+            "2-Покупка Звезд\n"
+            "3-Помощь",
             reply_markup=builder.as_markup()
         )
+
+    async def _show_balance(self, callback: CallbackQuery, bot: Bot) -> None:
+        """Отображение баланса пользователя"""
+        await callback.answer()
+
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="💳 Пополнить", callback_data="recharge"),
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
+        )
+
+        await callback.message.answer(
+            "💰 Ваш баланс:\n\n"
+            "⭐ 1000 звезд",
+            reply_markup=builder.as_markup()
+        )
+
+    async def _handle_recharge(self, callback: CallbackQuery, bot: Bot) -> None:
+        """Обработка выбора способа пополнения"""
+        await callback.answer()
+
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="💳 Пополнить через Heleket", callback_data="recharge_heleket"),
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_balance")
+        )
+
+        await callback.message.answer(
+            "Выберите способ пополнения:",
+            reply_markup=builder.as_markup()
+        )
+
+    async def _back_to_main(self, callback: CallbackQuery, bot: Bot) -> None:
+        """Возврат в главное меню"""
+        await callback.answer()
+
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="1-Баланс", callback_data="balance"),
+            InlineKeyboardButton(text="2-Покупка Звезд", callback_data="buy_stars"),
+            InlineKeyboardButton(text="3-Помощь", callback_data="help")
+        )
+
+        await callback.message.answer(
+            "🌟 Добро пожаловать в наш бот!\n\n"
+            "Выберите действие:\n"
+            "1-Баланс\n"
+            "2-Покупка Звезд\n"
+            "3-Помощь",
+            reply_markup=builder.as_markup()
+        )
+
+    async def _back_to_balance(self, callback: CallbackQuery, bot: Bot) -> None:
+        """Возврат к экрану баланса"""
+        await callback.answer()
+        await self._show_balance(callback, bot)
+
+    async def _show_buy_stars(self, callback: CallbackQuery, bot: Bot) -> None:
+        """Отображение экрана покупки звезд"""
+        await callback.answer()
+
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="⭐ 100 звезд", callback_data="buy_100"),
+            InlineKeyboardButton(text="⭐ 250 звезд", callback_data="buy_250")
+        )
+        builder.row(
+            InlineKeyboardButton(text="⭐ 500 звезд", callback_data="buy_500"),
+            InlineKeyboardButton(text="⭐ 1000 звезд", callback_data="buy_1000")
+        )
+        builder.row(
+            InlineKeyboardButton(text="🎯 Своя сумма", callback_data="custom_amount"),
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
+        )
+
+        await callback.message.answer(
+            "Выберите пакет звезд:",
+            reply_markup=builder.as_markup()
+        )
+
+    async def _show_custom_amount(self, callback: CallbackQuery, bot: Bot) -> None:
+        """Отображение экрана ввода своей суммы"""
+        await callback.answer()
+
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_buy_stars")
+        )
+
+        await callback.message.answer(
+            "Введите сумму звезд для покупки:",
+            reply_markup=builder.as_markup()
+        )
+
+    async def _back_to_buy_stars(self, callback: CallbackQuery, bot: Bot) -> None:
+        """Возврат к экрану покупки звезд"""
+        await callback.answer()
+        await self._show_buy_stars(callback, bot)
+
+    async def _buy_stars_100(self, callback: CallbackQuery, bot: Bot) -> None:
+        """Покупка 100 звезд"""
+        await callback.answer()
+        await self._create_star_purchase(callback, bot, 100)
+
+    async def _buy_stars_250(self, callback: CallbackQuery, bot: Bot) -> None:
+        """Покупка 250 звезд"""
+        await callback.answer()
+        await self._create_star_purchase(callback, bot, 250)
+
+    async def _buy_stars_500(self, callback: CallbackQuery, bot: Bot) -> None:
+        """Покупка 500 звезд"""
+        await callback.answer()
+        await self._create_star_purchase(callback, bot, 500)
+
+    async def _buy_stars_1000(self, callback: CallbackQuery, bot: Bot) -> None:
+        """Покупка 1000 звезд"""
+        await callback.answer()
+        await self._create_star_purchase(callback, bot, 1000)
+
+    async def _create_star_purchase(self, callback: CallbackQuery, bot: Bot, amount: int) -> None:
+        """Создание покупки звезд через Heleket"""
+        user_id = callback.from_user.id
+
+        # Используем существующий метод create_invoice_for_user
+        invoice = await self.payment_service.create_invoice_for_user(user_id)
+
+        if "error" in invoice:
+            await callback.message.answer("Ошибка при создании счета. Пожалуйста, попробуйте позже.")
+            return
+
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(
+                text="🔍 Проверить оплату",
+                callback_data=f"check_payment_{invoice['result']['uuid']}"
+            )
+        )
+        builder.row(
+            InlineKeyboardButton(
+                text="⬅️ Назад",
+                callback_data="back_to_buy_stars"
+            )
+        )
+
+        await callback.message.answer(
+            f"Создан счет на покупку {amount} звезд.\n\n"
+            f"Ссылка на оплату: {invoice['result']['url']}",
+            reply_markup=builder.as_markup()
+        )
+
+    async def _show_help(self, callback: CallbackQuery, bot: Bot) -> None:
+        """Отображение экрана помощи"""
+        await callback.answer()
+
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="🎫 Создать тикет", callback_data="create_ticket"),
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
+        )
+
+        await callback.message.answer(
+            "🤖 Помощь\n\n"
+            "Этот бот позволяет вам:\n"
+            "• Проверять баланс звезд\n"
+            "• Покупать звезды через Heleket\n"
+            "• Получать поддержку от администрации\n\n"
+            "Звезды можно использовать для различных функций внутри бота.",
+            reply_markup=builder.as_markup()
+        )
+
+    async def _create_ticket(self, callback: CallbackQuery, bot: Bot) -> None:
+        """Создание тикета"""
+        await callback.answer()
+
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_help")
+        )
+
+        await callback.message.answer(
+            "🎫 Тикет создан! Администрация свяжется с вами в ближайшее время.",
+            reply_markup=builder.as_markup()
+        )
+
+    async def _back_to_help(self, callback: CallbackQuery, bot: Bot) -> None:
+        """Возврат к экрану помощи"""
+        await callback.answer()
+        await self._show_help(callback, bot)

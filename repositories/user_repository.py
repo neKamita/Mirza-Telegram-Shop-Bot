@@ -18,7 +18,6 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, unique=True, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    is_premium = Column(Boolean, default=False)
 
 class UserRepository(DatabaseInterface):
     """Репозиторий для управления пользователями через PostgreSQL"""
@@ -64,8 +63,7 @@ class UserRepository(DatabaseInterface):
                 return {
                     "id": user.id,
                     "user_id": user.user_id,
-                    "created_at": user.created_at,
-                    "is_premium": user.is_premium
+                    "created_at": user.created_at
                 }
             return None
 
@@ -76,25 +74,9 @@ class UserRepository(DatabaseInterface):
             result = await session.execute(stmt)
             return result.scalar_one_or_none() is not None
 
-    async def get_premium_users(self) -> list:
-        """Получение всех премиум пользователей"""
+    async def get_all_users(self) -> list:
+        """Получение всех пользователей"""
         async with self.async_session() as session:
-            stmt = select(User.user_id).where(User.is_premium == True)
+            stmt = select(User.user_id)
             result = await session.execute(stmt)
             return [row[0] for row in result.fetchall()]
-
-    async def set_premium_status(self, user_id: int, premium: bool = True) -> bool:
-        """Установка премиум статуса пользователю"""
-        async with self.async_session() as session:
-            try:
-                stmt = (
-                    update(User)
-                    .where(User.user_id == user_id)
-                    .values(is_premium=premium)
-                )
-                result = await session.execute(stmt)
-                await session.commit()
-                return result.rowcount > 0
-            except Exception:
-                await session.rollback()
-                return False
