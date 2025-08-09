@@ -170,3 +170,4 @@ nginx/ssl/
 
 *.pem
 *.pem
+/ssl
