@@ -6,46 +6,116 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
+      - REDIS_CLUSTER_URL=${REDIS_CLUSTER_URL}
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
       - MERCHANT_UUID=${MERCHANT_UUID}
       - API_KEY=${API_KEY}
+      - SSL_CERT_PATH=${SSL_CERT_PATH}
+      - SSL_KEY_PATH=${SSL_KEY_PATH}
     depends_on:
-      - redis
+      - redis-master
+      - redis-slave-1
+      - redis-slave-2
     volumes:
       - ./logs:/app/logs
+      - ${SSL_CERT_PATH}:/app/ssl/cert.pem
+      - ${SSL_KEY_PATH}:/app/ssl/key.pem
     networks:
       - bot-network
+      - redis-cluster
 
-  redis:
+  # Redis Cluster Configuration
+  redis-master:
     image: redis:7-alpine
-    container_name: telegram-redis
+    container_name: telegram-redis-master
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes-6379.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-6379.aof --dbfilename dump-6379.rdb --daemonize no
     volumes:
-      - redis_data:/data
+      - redis_master_data:/data
+      - ./redis/redis.conf:/etc/redis/redis.conf
     ports:
-      - "6380:6379"
+      - "6379:6379"
     networks:
-      - bot-network
+      - redis-cluster
 
+  redis-slave-1:
+    image: redis:7-alpine
+    container_name: telegram-redis-slave-1
+    restart: unless-stopped
+    command: redis-server --port 6380 --cluster-enabled yes --cluster-config-file nodes-6380.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-6380.aof --dbfilename dump-6380.rdb --daemonize no
+    volumes:
+      - redis_slave_1_data:/data
+      - ./redis/redis.conf:/etc/redis/redis.conf
+    ports:
+      - "6380:6380"
+    networks:
+      - redis-cluster
+
+  redis-slave-2:
+    image: redis:7-alpine
+    container_name: telegram-redis-slave-2
+    restart: unless-stopped
+    command: redis-server --port 6381 --cluster-enabled yes --cluster-config-file nodes-6381.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-6381.aof --dbfilename dump-6381.rdb --daemonize no
+    volumes:
+      - redis_slave_2_data:/data
+      - ./redis/redis.conf:/etc/redis/redis.conf
+    ports:
+      - "6381:6381"
+    networks:
+      - redis-cluster
+
+  # Enhanced Nginx with SSL and WebSocket support
   nginx:
     image: nginx:alpine
     container_name: telegram-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "8080:80"
+      - "8443:443"
+      - "8081:8080"  # WebSocket port
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/nginx.ssl.conf:/etc/nginx/nginx.ssl.conf
       - ./nginx/ssl:/etc/nginx/ssl
+      - ./nginx/conf.d:/etc/nginx/conf.d
     depends_on:
       - app
     networks:
       - bot-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Cluster Manager (for setup)
+  redis-cluster-manager:
+    image: redis:7-alpine
+    container_name: telegram-redis-cluster-manager
+    depends_on:
+      - redis-master
+      - redis-slave-1
+      - redis-slave-2
+    command: >
+      sh -c "
+      echo 'Waiting for Redis nodes to start...'
+      sleep 10
+      redis-cli -h redis-master -p 6379 cluster meet redis-slave-1 6380
+      redis-cli -h redis-master -p 6379 cluster meet redis-slave-2 6381
+      redis-cli -h redis-master -p 6379 cluster add-node redis-slave-1 6379 --cluster-slave
+      redis-cli -h redis-master -p 6379 cluster add-node redis-slave-2 6379 --cluster-slave
+      echo 'Redis cluster setup completed'
+      "
+    networks:
+      - redis-cluster
 
 volumes:
-  redis_data:
+  redis_master_data:
+  redis_slave_1_data:
+  redis_slave_2_data:
 
 networks:
   bot-network:
+    driver: bridge
+  redis-cluster:
     driver: bridge
