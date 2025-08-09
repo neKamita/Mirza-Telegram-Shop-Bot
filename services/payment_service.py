@@ -22,7 +22,7 @@ class PaymentService(PaymentInterface):
 
     def _generate_headers(self, data: str) -> Dict[str, str]:
         """Генерация заголовков для запросов"""
-        signature = hashlib.md5(
+        signature = hashlib.sha256(
             base64.b64encode(data.encode("ascii")) +
             self.api_key.encode("ascii")
         ).hexdigest()
