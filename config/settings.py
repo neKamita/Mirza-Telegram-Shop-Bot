@@ -56,6 +56,8 @@ class Settings:
         self.cache_ttl_user: int = int(os.getenv("CACHE_TTL_USER", "1800"))
         self.cache_ttl_session: int = int(os.getenv("CACHE_TTL_SESSION", "1800"))
         self.cache_ttl_payment: int = int(os.getenv("CACHE_TTL_PAYMENT", "900"))
+        self.cache_ttl_invoice: int = int(os.getenv("CACHE_TTL_INVOICE", "1800"))
+        self.cache_ttl_payment_status: int = int(os.getenv("CACHE_TTL_PAYMENT_STATUS", "900"))
         self.cache_ttl_rate_limit: int = int(os.getenv("CACHE_TTL_RATE_LIMIT", "60"))
 
         # Rate Limiting Configuration

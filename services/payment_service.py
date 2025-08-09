@@ -5,6 +5,7 @@ import json
 import hashlib
 import hmac
 import base64
+import logging
 import aiohttp
 import time
 from typing import Dict, Any, Optional
@@ -20,29 +21,36 @@ class PaymentService(PaymentInterface):
         self.api_key = api_key
         self.payment_cache = payment_cache
         self.base_url = "https://api.heleket.com/v1"
+        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger(__name__)
 
     def _generate_headers(self, data: str) -> Dict[str, str]:
         """Генерация заголовков для запросов"""
-        # Use HMAC-SHA256 for secure signature generation
-        signature = hmac.new(
-            self.api_key.encode("ascii"),
-            base64.b64encode(data.encode("ascii")),
-            hashlib.sha256
+        signature = hashlib.md5(
+            base64.b64encode(data.encode("ascii")) +
+            self.api_key.encode("ascii")
         ).hexdigest()
-        return {
+
+        headers = {
             "merchant": self.merchant_uuid,
             "sign": signature,
             "Content-Type": "application/json"
         }
 
+        self.logger.warning("Используется MD5 для совместимости с Heleket API")
+        self.logger.debug(f"Generated headers: merchant={self.merchant_uuid[:8]}..., sign={signature[:8]}...")
+        return headers
+
     async def create_invoice(self, amount: str, currency: str, order_id: str) -> Dict[str, Any]:
         """Создание счета на оплату с кешированием"""
         cache_key = f"invoice:{order_id}"
+        self.logger.info(f"Creating invoice: amount={amount}, currency={currency}, order_id={order_id}")
 
         # Проверяем кеш
         if self.payment_cache:
             cached_invoice = await self.payment_cache.get_payment_details(cache_key)
             if cached_invoice:
+                self.logger.info(f"Using cached invoice for {order_id}")
                 return cached_invoice
 
         payload = {
@@ -54,24 +62,43 @@ class PaymentService(PaymentInterface):
         json_data = json.dumps(payload)
         headers = self._generate_headers(json_data)
 
+        self.logger.debug(f"Request payload: {json_data}")
+        self.logger.debug(f"Request URL: {self.base_url}/payment")
+
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self.base_url}/payment",
                     headers=headers,
-                    data=json_data
+                    data=json_data,
+                    timeout=aiohttp.ClientTimeout(total=30)
                 ) as response:
-                    result = await response.json()
+                    self.logger.info(f"Response status: {response.status}")
+                    response_text = await response.text()
+                    self.logger.debug(f"Response text: {response_text}")
 
-                    # Кешируем результат
-                    if self.payment_cache and "result" in result:
-                        await self.payment_cache.cache_payment_details(
-                            cache_key,
-                            result
-                        )
+                    try:
+                        result = json.loads(response_text)
+                        self.logger.info(f"Parsed JSON response: {result}")
 
-                    return result
+                        # Кешируем результат
+                        if self.payment_cache and "result" in result:
+                            await self.payment_cache.cache_payment_details(
+                                cache_key,
+                                result
+                            )
+                            self.logger.info(f"Cached invoice for {order_id}")
+
+                        return result
+                    except json.JSONDecodeError as e:
+                        self.logger.error(f"Failed to parse JSON response: {e}")
+                        return {"error": f"Invalid JSON response: {response_text}", "status": "failed"}
+
+        except aiohttp.ClientError as e:
+            self.logger.error(f"Network error during payment request: {e}")
+            return {"error": f"Network error: {str(e)}", "status": "failed"}
         except Exception as e:
+            self.logger.error(f"Unexpected error during payment request: {e}", exc_info=True)
             return {"error": str(e), "status": "failed"}
 
     async def check_payment(self, invoice_uuid: str) -> Dict[str, Any]:
