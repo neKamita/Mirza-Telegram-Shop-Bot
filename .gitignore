@@ -167,3 +167,5 @@ nginx/ssl/
 
 # Cache
 .cache/
+
+*.pem
