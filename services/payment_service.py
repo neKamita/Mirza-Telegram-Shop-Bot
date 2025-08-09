@@ -21,7 +21,15 @@ class PaymentService(PaymentInterface):
         self.base_url = "https://api.heleket.com/v1"
 
     def _generate_headers(self, data: str) -> Dict[str, str]:
-        """Генерация заголовков для запросов"""
+        """
+        Generate HTTP headers for API requests, including a SHA-256 signature of the request data and API key.
+        
+        Parameters:
+            data (str): The request payload to be signed.
+        
+        Returns:
+            Dict[str, str]: A dictionary containing the merchant ID, computed signature, and content type.
+        """
         signature = hashlib.sha256(
             base64.b64encode(data.encode("ascii")) +
             self.api_key.encode("ascii")
