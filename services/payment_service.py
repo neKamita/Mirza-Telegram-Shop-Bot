@@ -3,6 +3,7 @@
 """
 import json
 import hashlib
+import hmac
 import base64
 import aiohttp
 import time
@@ -22,9 +23,11 @@ class PaymentService(PaymentInterface):
 
     def _generate_headers(self, data: str) -> Dict[str, str]:
         """Генерация заголовков для запросов"""
-        signature = hashlib.sha256(
-            base64.b64encode(data.encode("ascii")) +
-            self.api_key.encode("ascii")
+        # Use HMAC-SHA256 for secure signature generation
+        signature = hmac.new(
+            self.api_key.encode("ascii"),
+            base64.b64encode(data.encode("ascii")),
+            hashlib.sha256
         ).hexdigest()
         return {
             "merchant": self.merchant_uuid,
