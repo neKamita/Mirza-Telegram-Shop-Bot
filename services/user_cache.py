@@ -12,7 +12,7 @@ from config.settings import settings
 class UserCache:
     """Специализированный сервис для кеширования пользовательских данных"""
 
-    def __init__(self, redis_client: redis.Redis):
+    def __init__(self, redis_client: Any):
         self.redis_client = redis_client
         self.logger = logging.getLogger(__name__)
         self.CACHE_PREFIX = "user:"

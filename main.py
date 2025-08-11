@@ -8,7 +8,15 @@ from aiogram.methods import DeleteWebhook
 
 from config.settings import settings
 from repositories.user_repository import UserRepository
+from repositories.balance_repository import BalanceRepository
 from services.payment_service import PaymentService
+from services.balance_service import BalanceService
+from services.star_purchase_service import StarPurchaseService
+from services.webhook_handler import WebhookHandler
+from services.user_cache import UserCache
+from services.payment_cache import PaymentCache
+from services.session_cache import SessionCache
+from services.rate_limit_cache import RateLimitCache
 from handlers.message_handler import MessageHandler
 
 
@@ -16,6 +24,58 @@ async def init_database():
     """Инициализация базы данных"""
     user_repository = UserRepository(database_url=settings.database_url)
     await user_repository.create_tables()
+
+
+async def init_cache_services():
+    """Инициализация сервисов кэширования"""
+    cache_services = {}
+
+    # Инициализация Redis кэша
+    if settings.redis_url:
+        try:
+            import redis.asyncio as redis
+            from redis.cluster import RedisCluster
+            from typing import Union
+            from services.user_cache import UserCache
+            from services.payment_cache import PaymentCache
+            from services.session_cache import SessionCache
+            from services.rate_limit_cache import RateLimitCache
+
+            # Создаем Redis клиент с поддержкой кластера
+            if settings.is_redis_cluster:
+                startup_nodes = [
+                    {"host": host.split(":")[0], "port": int(host.split(":")[1])}
+                    for host in settings.redis_cluster_nodes.split(",")
+                ]
+                redis_client = RedisCluster(
+                    startup_nodes=startup_nodes,
+                    password=settings.redis_password,
+                    decode_responses=False,
+                    skip_full_coverage_check=True
+                )
+            else:
+                redis_client = redis.from_url(settings.redis_url, decode_responses=False)
+
+            await redis_client.ping()  # Проверка подключения
+
+            # Создаем кеш пользователей
+            cache_services['user_cache'] = UserCache(redis_client)
+
+            # Создаем кеш платежей
+            cache_services['payment_cache'] = PaymentCache(redis_client)
+
+            # Создаем кеш сессий
+            cache_services['session_cache'] = SessionCache(redis_client)
+
+            # Создаем кеш для rate limiting
+            cache_services['rate_limit_cache'] = RateLimitCache(redis_client)
+
+            logging.info("Cache services initialized successfully")
+        except Exception as e:
+            logging.error(f"Failed to initialize cache services: {e}")
+            # Продолжаем работу без кеша
+
+    return cache_services
 
 
 async def main():
@@ -26,17 +86,62 @@ async def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
+    logging.info("Starting application initialization...")
+
+    # Инициализация сервисов кэширования
+    cache_services = await init_cache_services()
+
+    # Извлечение кеш сервисов
+    user_cache = cache_services.get('user_cache')
+    payment_cache = cache_services.get('payment_cache')
+    session_cache = cache_services.get('session_cache')
+    rate_limit_cache = cache_services.get('rate_limit_cache')
+
     # Инициализация компонентов
-    user_repository = UserRepository(database_url=settings.database_url)
+    user_repository = UserRepository(
+        database_url=settings.database_url,
+        user_cache=user_cache
+    )
+
+    balance_repository = BalanceRepository(user_repository.async_session)
+
     payment_service = PaymentService(
         merchant_uuid=settings.merchant_uuid,
-        api_key=settings.api_key
+        api_key=settings.api_key,
+        payment_cache=payment_cache
+    )
+
+    # Инициализация сервисов
+    balance_service = BalanceService(
+        user_repository=user_repository,
+        balance_repository=balance_repository,
+        user_cache=user_cache
+    )
+
+    star_purchase_service = StarPurchaseService(
+        user_repository=user_repository,
+        balance_repository=balance_repository,
+        payment_service=payment_service,
+        user_cache=user_cache,
+        payment_cache=payment_cache
     )
 
     # Инициализация обработчиков
     message_handler = MessageHandler(
         user_repository=user_repository,
-        payment_service=payment_service
+        payment_service=payment_service,
+        balance_service=balance_service,
+        star_purchase_service=star_purchase_service,
+        session_cache=session_cache,
+        rate_limit_cache=rate_limit_cache,
+        payment_cache=payment_cache
+    )
+
+    # Инициализация вебхук обработчика
+    webhook_handler = WebhookHandler(
+        star_purchase_service=star_purchase_service,
+        user_cache=user_cache,
+        payment_cache=payment_cache
     )
 
     # Инициализация бота и диспетчера
@@ -50,8 +155,14 @@ async def main():
     await init_database()
     logging.info("Database initialized successfully")
 
+    # Запуск вебхука для платежей
+    if settings.balance_service_enabled and settings.webhook_enabled:
+        logging.info(f"Starting webhook server on {settings.webhook_host}:{settings.webhook_port}")
+        # Здесь будет запуск вебхука
+
     # Запуск бота
     await bot(DeleteWebhook(drop_pending_updates=True))
+    logging.info("Starting Telegram bot polling...")
     await dp.start_polling(bot)
 
 

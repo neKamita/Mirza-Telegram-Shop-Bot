@@ -2,16 +2,17 @@
 Сервис кеширования через Redis
 """
 import json
-from typing import Any, Optional
+from typing import Any, Optional, Union
 import redis.asyncio as redis
+from redis.cluster import RedisCluster
 from datetime import timedelta
 
 
 class CacheService:
     """Сервис для работы с Redis кешем"""
 
-    def __init__(self, redis_url: str, db: int = 0):
-        self.redis_client = redis.from_url(redis_url, db=db)
+    def __init__(self, redis_client: Union[redis.Redis, RedisCluster]):
+        self.redis_client = redis_client
 
     async def get(self, key: str) -> Optional[Any]:
         """Получение значения из кеша"""
@@ -41,9 +42,7 @@ class CacheService:
         """Проверка существования ключа"""
         return await self.redis_client.exists(key) > 0
 
-    async def close(self):
-        """Закрытие соединения"""
-        await self.redis_client.close()
+    # Метод close удален для совместимости с разными типами Redis клиентов
 
     # Методы для специфичных кейсов
     async def cache_user_session(self, user_id: int, data: dict, ttl: int = 1800):

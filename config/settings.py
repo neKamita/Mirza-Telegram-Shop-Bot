@@ -38,10 +38,15 @@ class Settings:
         self.database_max_overflow: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "20"))
 
         # Redis Configuration
-        self.redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379")
-        self.redis_cluster_url: str = os.getenv("REDIS_CLUSTER_URL", "redis://localhost:6379")
+        self.redis_url: str = os.getenv("REDIS_URL", "redis://localhost:7379")
+        self.redis_cluster_url: str = os.getenv("REDIS_CLUSTER_URL", "redis://localhost:7379")
+        self.redis_cluster_nodes: str = os.getenv("REDIS_CLUSTER_NODES", "localhost:7379,localhost:7380,localhost:7381")
+        self.redis_cluster_enabled: bool = os.getenv("REDIS_CLUSTER_ENABLED", "False").lower() == "true"
         self.redis_password: str = os.getenv("REDIS_PASSWORD", "")
         self.redis_db: int = int(os.getenv("REDIS_DB", "0"))
+
+        # Определяем, используем ли мы Redis кластер
+        self.is_redis_cluster = self.redis_cluster_enabled
 
         # SSL Configuration
         self.ssl_cert_path: str = os.getenv("SSL_CERT_PATH", "./ssl/cert.pem")
@@ -51,6 +56,47 @@ class Settings:
         # WebSocket Configuration
         self.websocket_port: int = int(os.getenv("WEBSOCKET_PORT", "8080"))
         self.websocket_host: str = os.getenv("WEBSOCKET_HOST", "0.0.0.0")
+
+        # Balance Service Configuration
+        self.balance_service_enabled: bool = os.getenv("BALANCE_SERVICE_ENABLED", "True").lower() == "true"
+        self.min_purchase_amount: int = int(os.getenv("MIN_PURCHASE_AMOUNT", "1"))
+        self.max_purchase_amount: int = int(os.getenv("MAX_PURCHASE_AMOUNT", "100000"))
+        self.default_currency: str = os.getenv("DEFAULT_CURRENCY", "TON")
+
+        # Balance Purchase Configuration
+        self.balance_purchase_enabled: bool = os.getenv("BALANCE_PURCHASE_ENABLED", "True").lower() == "true"
+        self.min_balance_purchase_amount: int = int(os.getenv("MIN_BALANCE_PURCHASE_AMOUNT", "1"))
+        self.max_balance_purchase_amount: int = int(os.getenv("MAX_BALANCE_PURCHASE_AMOUNT", "10000"))
+        self.balance_purchase_currency: str = os.getenv("BALANCE_PURCHASE_CURRENCY", "TON")
+
+        # Balance Notifications Configuration
+        self.balance_notifications_enabled: bool = os.getenv("BALANCE_NOTIFICATIONS_ENABLED", "True").lower() == "true"
+        self.purchase_notification_template: str = os.getenv("PURCHASE_NOTIFICATION_TEMPLATE",
+            "✅ Покупка успешна!\n\n"
+            "⭐ Куплено звезд: {stars_count}\n"
+            "💰 Баланс до: {old_balance:.2f} {currency}\n"
+            "💰 Баланс после: {new_balance:.2f} {currency}\n\n"
+            "Спасибо за покупку!")
+        self.insufficient_funds_template: str = os.getenv("INSUFFICIENT_FUNDS_TEMPLATE",
+            "❌ Недостаточно средств!\n\n"
+            "💰 Ваш баланс: {balance:.2f} {currency}\n"
+            "💸 Требуется: {required_amount:.2f} {currency}\n\n"
+            "Пополните баланс для покупки звезд.")
+
+        # Balance Recharge Configuration
+        self.balance_recharge_enabled: bool = os.getenv("BALANCE_RECHARGE_ENABLED", "True").lower() == "true"
+        self.min_recharge_amount: float = float(os.getenv("MIN_RECHARGE_AMOUNT", "10.0"))
+        self.max_recharge_amount: float = float(os.getenv("MAX_RECHARGE_AMOUNT", "10000.0"))
+        self.recharge_currency: str = os.getenv("RECHARGE_CURRENCY", "TON")
+        self.recharge_description: str = os.getenv("RECHARGE_DESCRIPTION", "Пополнение баланса")
+        self.recharge_transaction_type: str = os.getenv("RECHARGE_TRANSACTION_TYPE", "recharge")
+
+        # Webhook Configuration
+        self.webhook_secret: str = os.getenv("WEBHOOK_SECRET", "your-webhook-secret-key")
+        self.webhook_path: str = os.getenv("WEBHOOK_PATH", "/webhook/heleket")
+        self.webhook_host: str = os.getenv("WEBHOOK_HOST", "0.0.0.0")
+        self.webhook_port: int = int(os.getenv("WEBHOOK_PORT", "8001"))
+        self.webhook_enabled: bool = os.getenv("WEBHOOK_ENABLED", "True").lower() == "true"
 
         # Cache Configuration
         self.cache_ttl_user: int = int(os.getenv("CACHE_TTL_USER", "1800"))

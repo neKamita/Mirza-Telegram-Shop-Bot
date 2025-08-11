@@ -12,10 +12,20 @@ services:
       - API_KEY=${API_KEY}
       - SSL_CERT_PATH=${SSL_CERT_PATH}
       - SSL_KEY_PATH=${SSL_KEY_PATH}
+      - WEBHOOK_ENABLED=${WEBHOOK_ENABLED}
+      - WEBHOOK_HOST=${WEBHOOK_HOST}
+      - WEBHOOK_PORT=${WEBHOOK_PORT}
+      - WEBHOOK_PATH=${WEBHOOK_PATH}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - BALANCE_SERVICE_ENABLED=${BALANCE_SERVICE_ENABLED}
+      - BALANCE_PURCHASE_ENABLED=${BALANCE_PURCHASE_ENABLED}
+      - BALANCE_NOTIFICATIONS_ENABLED=${BALANCE_NOTIFICATIONS_ENABLED}
+      - RECHARGE_ENABLED=${RECHARGE_ENABLED}
     depends_on:
-      - redis-master
-      - redis-slave-1
-      - redis-slave-2
+      db:
+        condition: service_started
+      redis-node-1:
+        condition: service_started
     volumes:
       - ./logs:/app/logs
       - ${SSL_CERT_PATH}:/app/ssl/cert.pem
@@ -23,46 +33,178 @@ services:
     networks:
       - bot-network
       - redis-cluster
+    healthcheck:
+      test: ["CMD", "python", "-c", "import asyncio; import sys; sys.path.append('/app'); from repositories.user_repository import UserRepository; import os; repo = UserRepository(os.getenv('DATABASE_URL', '')); asyncio.run(repo.create_tables())"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Database service
+  db:
+    image: postgres:16-alpine
+    container_name: telegram-bot-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=telegram_bot
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - bot-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Redis Cluster Configuration
-  redis-master:
+  redis-node-1:
     image: redis:7-alpine
-    container_name: telegram-redis-master
+    container_name: telegram-redis-node-1
     restart: unless-stopped
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes-6379.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-6379.aof --dbfilename dump-6379.rdb --daemonize no
+    command: redis-server /etc/redis/redis.conf --port 7379 --cluster-enabled yes --cluster-config-file nodes-7379.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7379.aof --dbfilename dump-7379.rdb --requirepass ${REDIS_PASSWORD}
     volumes:
-      - redis_master_data:/data
-      - ./redis/redis.conf:/etc/redis/redis.conf
+      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+      - redis_node_1_data:/data
     ports:
-      - "6379:6379"
+      - "7379:7379"
     networks:
       - redis-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7379", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  redis-slave-1:
+  redis-node-2:
     image: redis:7-alpine
-    container_name: telegram-redis-slave-1
+    container_name: telegram-redis-node-2
     restart: unless-stopped
-    command: redis-server --port 6380 --cluster-enabled yes --cluster-config-file nodes-6380.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-6380.aof --dbfilename dump-6380.rdb --daemonize no
+    command: redis-server /etc/redis/redis.conf --port 7380 --cluster-enabled yes --cluster-config-file nodes-7380.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7380.aof --dbfilename dump-7380.rdb --requirepass ${REDIS_PASSWORD}
     volumes:
-      - redis_slave_1_data:/data
-      - ./redis/redis.conf:/etc/redis/redis.conf
+      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+      - redis_node_2_data:/data
     ports:
-      - "6380:6380"
+      - "7380:7380"
     networks:
       - redis-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7380", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  redis-slave-2:
+  redis-node-3:
     image: redis:7-alpine
-    container_name: telegram-redis-slave-2
+    container_name: telegram-redis-node-3
     restart: unless-stopped
-    command: redis-server --port 6381 --cluster-enabled yes --cluster-config-file nodes-6381.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-6381.aof --dbfilename dump-6381.rdb --daemonize no
+    command: redis-server /etc/redis/redis.conf --port 7381 --cluster-enabled yes --cluster-config-file nodes-7381.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7381.aof --dbfilename dump-7381.rdb --requirepass ${REDIS_PASSWORD}
     volumes:
-      - redis_slave_2_data:/data
-      - ./redis/redis.conf:/etc/redis/redis.conf
+      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+      - redis_node_3_data:/data
     ports:
-      - "6381:6381"
+      - "7381:7381"
     networks:
       - redis-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7381", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Replicas
+  redis-replica-1:
+    image: redis:7-alpine
+    container_name: telegram-redis-replica-1
+    restart: unless-stopped
+    command: redis-server /etc/redis/redis.conf --port 7382 --cluster-enabled yes --cluster-config-file nodes-7382.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7382.aof --dbfilename dump-7382.rdb --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+      - redis_replica_1_data:/data
+    ports:
+      - "7382:7382"
+    networks:
+      - redis-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7382", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis-replica-2:
+    image: redis:7-alpine
+    container_name: telegram-redis-replica-2
+    restart: unless-stopped
+    command: redis-server /etc/redis/redis.conf --port 7383 --cluster-enabled yes --cluster-config-file nodes-7383.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7383.aof --dbfilename dump-7383.rdb --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+      - redis_replica_2_data:/data
+    ports:
+      - "7383:7383"
+    networks:
+      - redis-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7383", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis-replica-3:
+    image: redis:7-alpine
+    container_name: telegram-redis-replica-3
+    restart: unless-stopped
+    command: redis-server /etc/redis/redis.conf --port 7384 --cluster-enabled yes --cluster-config-file nodes-7384.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7384.aof --dbfilename dump-7384.rdb --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+      - redis_replica_3_data:/data
+    ports:
+      - "7384:7384"
+    networks:
+      - redis-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7384", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Webhook service for balance and payment processing
+  webhook:
+    build: .
+    container_name: telegram-bot-webhook
+    restart: unless-stopped
+    command: ["python", "-m", "uvicorn", "services.webhook_app:app", "--host", "0.0.0.0", "--port", "8001"]
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - REDIS_CLUSTER_URL=${REDIS_CLUSTER_URL}
+      - MERCHANT_UUID=${MERCHANT_UUID}
+      - API_KEY=${API_KEY}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - WEBHOOK_HOST=${WEBHOOK_HOST}
+      - WEBHOOK_PORT=${WEBHOOK_PORT}
+      - WEBHOOK_PATH=${WEBHOOK_PATH}
+      - DEBUG=${DEBUG}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - ENVIRONMENT=${ENVIRONMENT}
+    depends_on:
+      db:
+        condition: service_started
+      redis-node-1:
+        condition: service_started
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - bot-network
+      - redis-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Enhanced Nginx with SSL and WebSocket support
   nginx:
@@ -75,9 +217,8 @@ services:
       - "8081:8080"  # WebSocket port
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/nginx.ssl.conf:/etc/nginx/nginx.ssl.conf
-      - ./nginx/ssl:/etc/nginx/ssl
       - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
     depends_on:
       - app
     networks:
@@ -88,31 +229,41 @@ services:
       timeout: 10s
       retries: 3
 
-  # Redis Cluster Manager (for setup)
-  redis-cluster-manager:
+  # Redis Cluster creation using redis-cli --cluster
+  redis-cluster-creator:
     image: redis:7-alpine
-    container_name: telegram-redis-cluster-manager
+    container_name: telegram-redis-cluster-creator
     depends_on:
-      - redis-master
-      - redis-slave-1
-      - redis-slave-2
+      redis-node-1:
+        condition: service_started
+      redis-node-2:
+        condition: service_started
+      redis-node-3:
+        condition: service_started
+      redis-replica-1:
+        condition: service_started
+      redis-replica-2:
+        condition: service_started
+      redis-replica-3:
+        condition: service_started
     command: >
-      sh -c "
-      echo 'Waiting for Redis nodes to start...'
-      sleep 10
-      redis-cli -h redis-master -p 6379 cluster meet redis-slave-1 6380
-      redis-cli -h redis-master -p 6379 cluster meet redis-slave-2 6381
-      redis-cli -h redis-master -p 6379 cluster add-node redis-slave-1 6379 --cluster-slave
-      redis-cli -h redis-master -p 6379 cluster add-node redis-slave-2 6379 --cluster-slave
-      echo 'Redis cluster setup completed'
-      "
+      sh -c "echo 'Waiting for Redis nodes to start...';
+             sleep 10;
+             redis-cli --cluster create redis-node-1:7379 redis-node-2:7380 redis-node-3:7381 redis-replica-1:7382 redis-replica-2:7383 redis-replica-3:7384 --cluster-replicas 1 --cluster-yes -a root123;
+             echo 'Redis cluster created successfully'"
     networks:
       - redis-cluster
+    profiles:
+      - create-cluster
 
 volumes:
-  redis_master_data:
-  redis_slave_1_data:
-  redis_slave_2_data:
+  redis_node_1_data:
+  redis_node_2_data:
+  redis_node_3_data:
+  redis_replica_1_data:
+  redis_replica_2_data:
+  redis_replica_3_data:
+  postgres_data:
 
 networks:
   bot-network:

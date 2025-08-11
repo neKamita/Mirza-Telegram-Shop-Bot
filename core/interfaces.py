@@ -48,6 +48,66 @@ class PaymentInterface(ABC):
 # AIServiceInterface был удален как неиспользуемый
 
 
+class BalanceServiceInterface(ABC):
+    """Интерфейс для сервиса баланса"""
+
+    @abstractmethod
+    async def get_user_balance(self, user_id: int) -> Dict[str, Any]:
+        """Получение баланса пользователя"""
+        pass
+
+    @abstractmethod
+    async def update_user_balance(self, user_id: int, amount: float, operation: str = "add") -> bool:
+        """Обновление баланса пользователя"""
+        pass
+
+    @abstractmethod
+    async def get_user_transactions(self, user_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+        """Получение транзакций пользователя"""
+        pass
+
+    @abstractmethod
+    async def create_transaction(self, user_id: int, transaction_type: str, amount: float,
+                                description: Optional[str] = None, external_id: Optional[str] = None,
+                                metadata: Optional[Dict[str, Any]] = None) -> Optional[int]:
+        """Создание транзакции"""
+        pass
+
+    @abstractmethod
+    async def process_recharge(self, user_id: int, amount: float, payment_uuid: str) -> bool:
+        """Обработка пополнения баланса"""
+        pass
+
+    @abstractmethod
+    async def get_recharge_history(self, user_id: int, limit: int = 10) -> List[Dict[str, Any]]:
+        """Получение истории пополнений баланса"""
+        pass
+
+
+class StarPurchaseServiceInterface(ABC):
+    """Интерфейс для сервиса покупки звезд"""
+
+    @abstractmethod
+    async def create_star_purchase(self, user_id: int, amount: int) -> Dict[str, Any]:
+        """Создание покупки звезд"""
+        pass
+
+    @abstractmethod
+    async def check_purchase_status(self, purchase_id: str) -> Dict[str, Any]:
+        """Проверка статуса покупки"""
+        pass
+
+    @abstractmethod
+    async def process_payment_webhook(self, webhook_data: Dict[str, Any]) -> bool:
+        """Обработка вебхука от платежной системы"""
+        pass
+
+    @abstractmethod
+    async def get_purchase_history(self, user_id: int, limit: int = 10) -> List[Dict[str, Any]]:
+        """Получение истории покупок пользователя"""
+        pass
+
+
 class EventHandlerInterface(ABC):
     """Интерфейс для обработчиков событий"""
 

@@ -13,7 +13,7 @@ from config.settings import settings
 class RateLimitCache:
     """Специализированный сервис для rate limiting"""
 
-    def __init__(self, redis_client: redis.Redis):
+    def __init__(self, redis_client: Any):
         self.redis_client = redis_client
         self.logger = logging.getLogger(__name__)
         self.RATE_LIMIT_PREFIX = "rate_limit:"

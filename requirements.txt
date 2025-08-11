@@ -8,6 +8,9 @@ alembic>=1.12.0
 
 # HTTP Client
 aiohttp>=3.8.0
+uvicorn>=0.20.0
+fastapi>=0.85.0
+starlette>=0.21.0
 
 # Configuration
 python-dotenv>=1.0.0
@@ -29,3 +32,23 @@ python-dateutil>=2.8.0
 
 # Redis
 redis>=4.5.0
+
+# Webhook dependencies
+websockets>=10.0
+
+# Cryptography
+cryptography>=3.4.8
+
+# JSON handling
+orjson>=3.8.0
+
+# Monitoring and metrics
+prometheus-client>=0.15.0
+
+# Health checks
+httpx>=0.23.0
+
+# Testing (development dependencies)
+pytest>=7.0.0
+pytest-asyncio>=0.20.0
+pytest-cov>=4.0.0

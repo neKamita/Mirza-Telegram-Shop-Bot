@@ -171,3 +171,5 @@ nginx/ssl/
 *.pem
 *.pem
 /ssl
+INSTRUCTIONS.md
+REDIS_PORTS_CHANGE_INSTRUCTIONS.md

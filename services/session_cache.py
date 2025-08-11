@@ -13,7 +13,7 @@ from config.settings import settings
 class SessionCache:
     """Специализированный сервис для управления сессиями пользователей"""
 
-    def __init__(self, redis_client: redis.Redis):
+    def __init__(self, redis_client: Any):
         self.redis_client = redis_client
         self.logger = logging.getLogger(__name__)
         self.SESSION_PREFIX = "session:"

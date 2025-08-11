@@ -12,7 +12,7 @@ from config.settings import settings
 class PaymentCache:
     """Специализированный сервис для кеширования платежных данных"""
 
-    def __init__(self, redis_client: redis.Redis):
+    def __init__(self, redis_client: Any):
         self.redis_client = redis_client
         self.logger = logging.getLogger(__name__)
         self.PAYMENT_PREFIX = "payment:"

@@ -157,6 +157,58 @@ class PaymentService(PaymentInterface):
             order_id=order_id
         )
 
+    async def create_recharge_invoice(self, user_id: int, amount: str) -> Dict[str, Any]:
+        """Создание счета на пополнение баланса с кешированием"""
+        order_id = f"recharge-{user_id}-{int(time.time())}"
+
+        # Кешируем информацию о пополнении
+        if self.payment_cache:
+            await self.payment_cache.cache_payment_details(
+                f"recharge:{user_id}:{order_id}",
+                {
+                    "user_id": user_id,
+                    "amount": amount,
+                    "currency": "TON",
+                    "type": "recharge",
+                    "created_at": time.time()
+                }
+            )
+
+        return await self.create_invoice(
+            amount=amount,
+            currency="TON",
+            order_id=order_id
+        )
+
+    async def create_recharge_invoice_for_user(self, user_id: int, amount: str = "10") -> Dict[str, Any]:
+        """Создание счета на пополнение баланса для конкретного пользователя с кешированием"""
+        return await self.create_recharge_invoice(user_id, amount)
+
+    async def get_recharge_history(self, user_id: int, limit: int = 10) -> Dict[str, Any]:
+        """Получение истории пополнений пользователя из кеша"""
+        if not self.payment_cache:
+            return {"error": "Payment cache not available", "status": "failed"}
+
+        try:
+            # Получаем все ключи пополнений пользователя
+            pattern = f"recharge:{user_id}:*"
+            keys = await self.payment_cache.redis_client.keys(pattern)
+
+            recharges = []
+            for key in keys[:limit]:
+                key_str = key.decode('utf-8') if isinstance(key, bytes) else str(key)
+                recharge_data = await self.payment_cache.get_payment_details(key_str)
+                if recharge_data:
+                    recharges.append(recharge_data)
+
+            return {
+                "status": "success",
+                "recharges": recharges,
+                "total": len(recharges)
+            }
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
     async def get_payment_history(self, user_id: int, limit: int = 10) -> Dict[str, Any]:
         """Получение истории платежей пользователя из кеша"""
         if not self.payment_cache:
