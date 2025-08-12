@@ -24,6 +24,9 @@ pydantic>=2.0.0
 # Async utilities
 asyncio-throttle>=1.0.0
 
+# Retry mechanisms
+tenacity>=8.2.0
+
 # Rate limiting (необязательно)
 # aiogram-ratelimit>=1.0.0
 

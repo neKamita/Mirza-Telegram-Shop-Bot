@@ -38,15 +38,29 @@ class Settings:
         self.database_max_overflow: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "20"))
 
         # Redis Configuration
-        self.redis_url: str = os.getenv("REDIS_URL", "redis://localhost:7379")
-        self.redis_cluster_url: str = os.getenv("REDIS_CLUSTER_URL", "redis://localhost:7379")
-        self.redis_cluster_nodes: str = os.getenv("REDIS_CLUSTER_NODES", "localhost:7379,localhost:7380,localhost:7381")
+        self.redis_url: str = os.getenv("REDIS_URL", "redis://redis-node-1:7379")
+        self.redis_cluster_url: str = os.getenv("REDIS_CLUSTER_URL", "redis://redis-node-1:7379")
+        self.redis_cluster_nodes: str = os.getenv("REDIS_CLUSTER_NODES", "redis-node-1:7379,redis-node-2:7380,redis-node-3:7381")
         self.redis_cluster_enabled: bool = os.getenv("REDIS_CLUSTER_ENABLED", "False").lower() == "true"
         self.redis_password: str = os.getenv("REDIS_PASSWORD", "")
         self.redis_db: int = int(os.getenv("REDIS_DB", "0"))
 
         # Определяем, используем ли мы Redis кластер
         self.is_redis_cluster = self.redis_cluster_enabled
+
+        # Redis Client Configuration
+        self.redis_timeout: float = float(os.getenv("REDIS_TIMEOUT", "5.0"))
+        self.redis_retry_on_timeout: bool = os.getenv("REDIS_RETRY_ON_TIMEOUT", "True").lower() == "true"
+        self.redis_max_connections: int = int(os.getenv("REDIS_MAX_CONNECTIONS", "100"))
+        self.redis_socket_timeout: float = float(os.getenv("REDIS_SOCKET_TIMEOUT", "5.0"))
+        self.redis_socket_connect_timeout: float = float(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", "10.0"))
+        self.redis_health_check_interval: int = int(os.getenv("REDIS_HEALTH_CHECK_INTERVAL", "30"))
+        self.redis_retry_attempts: int = int(os.getenv("REDIS_RETRY_ATTEMPTS", "3"))
+        self.redis_retry_backoff_factor: float = float(os.getenv("REDIS_RETRY_BACKOFF_FACTOR", "1.0"))
+        self.redis_circuit_breaker_threshold: int = int(os.getenv("REDIS_CIRCUIT_BREAKER_THRESHOLD", "2"))
+        self.redis_circuit_breaker_timeout: int = int(os.getenv("REDIS_CIRCUIT_BREAKER_TIMEOUT", "15"))
+        self.redis_local_cache_enabled: bool = os.getenv("REDIS_LOCAL_CACHE_ENABLED", "True").lower() == "true"
+        self.redis_local_cache_ttl: int = int(os.getenv("REDIS_LOCAL_CACHE_TTL", "300"))
 
         # SSL Configuration
         self.ssl_cert_path: str = os.getenv("SSL_CERT_PATH", "./ssl/cert.pem")
