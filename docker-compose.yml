@@ -7,6 +7,9 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
       - REDIS_CLUSTER_URL=${REDIS_CLUSTER_URL}
+      - REDIS_CLUSTER_ENABLED=${REDIS_CLUSTER_ENABLED}
+      - REDIS_CLUSTER_NODES=${REDIS_CLUSTER_NODES}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
       - MERCHANT_UUID=${MERCHANT_UUID}
       - API_KEY=${API_KEY}
@@ -24,8 +27,8 @@ services:
     depends_on:
       db:
         condition: service_started
-      redis-node-1:
-        condition: service_started
+      redis-cluster-creator:
+        condition: service_completed_successfully
     volumes:
       - ./logs:/app/logs
       - ${SSL_CERT_PATH}:/app/ssl/cert.pem
@@ -34,15 +37,15 @@ services:
       - bot-network
       - redis-cluster
     healthcheck:
-      test: ["CMD", "python", "-c", "import asyncio; import sys; sys.path.append('/app'); from repositories.user_repository import UserRepository; import os; repo = UserRepository(os.getenv('DATABASE_URL', '')); asyncio.run(repo.create_tables())"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      test: ["CMD", "python", "-c", "import os; print('App healthy')"]
+      interval: 5s
+      timeout: 3s
+      retries: 2
+      start_period: 10s
 
   # Database service
   db:
-    image: postgres:16-alpine
+    image: postgres:16-bullseye
     container_name: telegram-bot-db
     restart: unless-stopped
     environment:
@@ -57,126 +60,235 @@ services:
       - bot-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 30s
-      timeout: 10s
+      interval: 5s
+      timeout: 3s
       retries: 3
 
   # Redis Cluster Configuration
   redis-node-1:
-    image: redis:7-alpine
+    image: redis:7-bullseye
     container_name: telegram-redis-node-1
     restart: unless-stopped
-    command: redis-server /etc/redis/redis.conf --port 7379 --cluster-enabled yes --cluster-config-file nodes-7379.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7379.aof --dbfilename dump-7379.rdb --requirepass ${REDIS_PASSWORD}
+    command: redis-server /etc/redis/redis.conf --port 7379 --cluster-enabled yes --cluster-config-file nodes-7379.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7379.aof --dbfilename dump-7379.rdb
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     volumes:
-      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+      - ./redis/conf/redis.conf:/etc/redis/redis.conf:ro
       - redis_node_1_data:/data
     ports:
       - "7379:7379"
     networks:
       - redis-cluster
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+        reservations:
+          memory: 1G
     healthcheck:
-      test: ["CMD", "redis-cli", "-p", "7379", "-a", "${REDIS_PASSWORD}", "ping"]
-      interval: 30s
-      timeout: 10s
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "redis-cli -p 7379 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
+        ]
+      interval: 3s
+      timeout: 2s
       retries: 3
+      start_period: 10s
 
   redis-node-2:
-    image: redis:7-alpine
+    image: redis:7-bullseye
     container_name: telegram-redis-node-2
     restart: unless-stopped
-    command: redis-server /etc/redis/redis.conf --port 7380 --cluster-enabled yes --cluster-config-file nodes-7380.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7380.aof --dbfilename dump-7380.rdb --requirepass ${REDIS_PASSWORD}
+    command: redis-server /etc/redis/redis.conf --port 7380 --cluster-enabled yes --cluster-config-file nodes-7380.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7380.aof --dbfilename dump-7380.rdb
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     volumes:
-      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+      - ./redis/conf/redis.conf:/etc/redis/redis.conf:ro
       - redis_node_2_data:/data
     ports:
       - "7380:7380"
     networks:
       - redis-cluster
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+        reservations:
+          memory: 1G
     healthcheck:
-      test: ["CMD", "redis-cli", "-p", "7380", "-a", "${REDIS_PASSWORD}", "ping"]
-      interval: 30s
-      timeout: 10s
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "redis-cli -p 7380 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
+        ]
+      interval: 3s
+      timeout: 2s
       retries: 3
+      start_period: 10s
 
   redis-node-3:
-    image: redis:7-alpine
+    image: redis:7-bullseye
     container_name: telegram-redis-node-3
     restart: unless-stopped
-    command: redis-server /etc/redis/redis.conf --port 7381 --cluster-enabled yes --cluster-config-file nodes-7381.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7381.aof --dbfilename dump-7381.rdb --requirepass ${REDIS_PASSWORD}
+    command: redis-server /etc/redis/redis.conf --port 7381 --cluster-enabled yes --cluster-config-file nodes-7381.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7381.aof --dbfilename dump-7381.rdb
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     volumes:
-      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+      - ./redis/conf/redis.conf:/etc/redis/redis.conf:ro
       - redis_node_3_data:/data
     ports:
       - "7381:7381"
     networks:
       - redis-cluster
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+        reservations:
+          memory: 1G
     healthcheck:
-      test: ["CMD", "redis-cli", "-p", "7381", "-a", "${REDIS_PASSWORD}", "ping"]
-      interval: 30s
-      timeout: 10s
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "redis-cli -p 7381 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
+        ]
+      interval: 3s
+      timeout: 2s
       retries: 3
+      start_period: 10s
 
   # Redis Replicas
   redis-replica-1:
-    image: redis:7-alpine
+    image: redis:7-bullseye
     container_name: telegram-redis-replica-1
     restart: unless-stopped
-    command: redis-server /etc/redis/redis.conf --port 7382 --cluster-enabled yes --cluster-config-file nodes-7382.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7382.aof --dbfilename dump-7382.rdb --requirepass ${REDIS_PASSWORD}
+    command: redis-server /etc/redis/redis.conf --port 7382 --cluster-enabled yes --cluster-config-file nodes-7382.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7382.aof --dbfilename dump-7382.rdb
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     volumes:
-      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+      - ./redis/conf/redis.conf:/etc/redis/redis.conf:ro
       - redis_replica_1_data:/data
     ports:
       - "7382:7382"
     networks:
       - redis-cluster
+    depends_on:
+      redis-node-1:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+        reservations:
+          memory: 1G
     healthcheck:
-      test: ["CMD", "redis-cli", "-p", "7382", "-a", "${REDIS_PASSWORD}", "ping"]
-      interval: 30s
-      timeout: 10s
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "redis-cli -p 7382 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
+        ]
+      interval: 3s
+      timeout: 2s
       retries: 3
+      start_period: 10s
 
   redis-replica-2:
-    image: redis:7-alpine
+    image: redis:7-bullseye
     container_name: telegram-redis-replica-2
     restart: unless-stopped
-    command: redis-server /etc/redis/redis.conf --port 7383 --cluster-enabled yes --cluster-config-file nodes-7383.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7383.aof --dbfilename dump-7383.rdb --requirepass ${REDIS_PASSWORD}
+    command: redis-server /etc/redis/redis.conf --port 7383 --cluster-enabled yes --cluster-config-file nodes-7383.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7383.aof --dbfilename dump-7383.rdb
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     volumes:
-      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+      - ./redis/conf/redis.conf:/etc/redis/redis.conf:ro
       - redis_replica_2_data:/data
     ports:
       - "7383:7383"
     networks:
       - redis-cluster
+    depends_on:
+      redis-node-2:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+        reservations:
+          memory: 1G
     healthcheck:
-      test: ["CMD", "redis-cli", "-p", "7383", "-a", "${REDIS_PASSWORD}", "ping"]
-      interval: 30s
-      timeout: 10s
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "redis-cli -p 7383 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
+        ]
+      interval: 3s
+      timeout: 2s
       retries: 3
+      start_period: 10s
 
   redis-replica-3:
-    image: redis:7-alpine
+    image: redis:7-bullseye
     container_name: telegram-redis-replica-3
     restart: unless-stopped
-    command: redis-server /etc/redis/redis.conf --port 7384 --cluster-enabled yes --cluster-config-file nodes-7384.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7384.aof --dbfilename dump-7384.rdb --requirepass ${REDIS_PASSWORD}
+    command: redis-server /etc/redis/redis.conf --port 7384 --cluster-enabled yes --cluster-config-file nodes-7384.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7384.aof --dbfilename dump-7384.rdb
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     volumes:
-      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+      - ./redis/conf/redis.conf:/etc/redis/redis.conf:ro
       - redis_replica_3_data:/data
     ports:
       - "7384:7384"
     networks:
       - redis-cluster
+    depends_on:
+      redis-node-3:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+        reservations:
+          memory: 1G
     healthcheck:
-      test: ["CMD", "redis-cli", "-p", "7384", "-a", "${REDIS_PASSWORD}", "ping"]
-      interval: 30s
-      timeout: 10s
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "redis-cli -p 7384 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
+        ]
+      interval: 3s
+      timeout: 2s
       retries: 3
+      start_period: 10s
 
   # Webhook service for balance and payment processing
   webhook:
     build: .
     container_name: telegram-bot-webhook
     restart: unless-stopped
-    command: ["python", "-m", "uvicorn", "services.webhook_app:app", "--host", "0.0.0.0", "--port", "8001"]
+    command:
+      [
+        "python",
+        "-m",
+        "uvicorn",
+        "services.webhook_app:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8001",
+      ]
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
@@ -193,8 +305,8 @@ services:
     depends_on:
       db:
         condition: service_started
-      redis-node-1:
-        condition: service_started
+      redis-cluster-creator:
+        condition: service_completed_successfully
     volumes:
       - ./logs:/app/logs
     networks:
@@ -208,13 +320,13 @@ services:
 
   # Enhanced Nginx with SSL and WebSocket support
   nginx:
-    image: nginx:alpine
+    image: nginx:bullseye
     container_name: telegram-nginx
     restart: unless-stopped
     ports:
       - "8080:80"
       - "8443:443"
-      - "8081:8080"  # WebSocket port
+      - "8081:8080" # WebSocket port
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
       - ./nginx/conf.d:/etc/nginx/conf.d
@@ -231,30 +343,52 @@ services:
 
   # Redis Cluster creation using redis-cli --cluster
   redis-cluster-creator:
-    image: redis:7-alpine
+    image: redis:7-bullseye
     container_name: telegram-redis-cluster-creator
     depends_on:
       redis-node-1:
-        condition: service_started
+        condition: service_healthy
       redis-node-2:
-        condition: service_started
+        condition: service_healthy
       redis-node-3:
-        condition: service_started
+        condition: service_healthy
       redis-replica-1:
-        condition: service_started
+        condition: service_healthy
       redis-replica-2:
-        condition: service_started
+        condition: service_healthy
       redis-replica-3:
-        condition: service_started
-    command: >
-      sh -c "echo 'Waiting for Redis nodes to start...';
-             sleep 10;
-             redis-cli --cluster create redis-node-1:7379 redis-node-2:7380 redis-node-3:7381 redis-replica-1:7382 redis-replica-2:7383 redis-replica-3:7384 --cluster-replicas 1 --cluster-yes -a root123;
-             echo 'Redis cluster created successfully'"
+        condition: service_healthy
+    command: ["sh", "-c", "cd /scripts && ./create_cluster.sh"]
     networks:
       - redis-cluster
-    profiles:
-      - create-cluster
+    restart: "no"
+    volumes:
+      - ./logs:/var/log
+      - ./redis/scripts:/scripts
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+
+  # Redis Cluster Monitor - автоматическая проверка состояния и восстановление
+  redis-cluster-monitor:
+    image: redis:7-bullseye
+    container_name: telegram-redis-cluster-monitor
+    depends_on:
+      redis-cluster-creator:
+        condition: service_completed_successfully
+    command: ["sh", "-c", "cd /scripts && ./monitor_cluster_new.sh"]
+    networks:
+      - redis-cluster
+    restart: unless-stopped
+    volumes:
+      - ./logs:/var/log
+      - ./redis/scripts:/scripts
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "sh", "-c", "pgrep -f 'redis-cluster-monitor' >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   redis_node_1_data:
@@ -270,3 +404,30 @@ networks:
     driver: bridge
   redis-cluster:
     driver: bridge
+# ===================================================================
+# РЕКОМЕНДАЦИИ ПО НАСТРОЙКЕ СИСТЕМЫ
+# ===================================================================
+
+# ВАЖНО: Для корректной работы Redis кластера с выделенной памятью необходимо настроить системные параметры
+
+# 1. Настройка overcommit_memory для хоста (не внутри контейнера):
+#    Добавьте в /etc/sysctl.conf:
+#    vm.overcommit_memory = 1
+#    vm.swappiness = 10
+#    vm.max_map_count = 262144
+#
+# 2. Примените изменения:
+#    sysctl -p
+#
+# 3. Проверьте текущие настройки:
+#    sysctl vm.overcommit_memory
+#
+# Если вы видите предупреждение "Memory overcommit must be enabled", выполните:
+#    sysctl vm.overcommit_memory=1
+#
+# Рекомендуемые значения:
+# - vm.overcommit_memory = 1: Разрешает выделение памяти даже если физической памяти недостаточно
+# - vm.swappiness = 10: Ограничивает использование swap для лучшей производительности
+# - vm.max_map_count = 262144: Увеличивает лимит для процессов с большим количеством memory mappings
+#
+# Для Docker Swarm/Kubernetes эти настройки должны применяться на уровне узлов кластера

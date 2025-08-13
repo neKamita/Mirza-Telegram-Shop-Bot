@@ -2,6 +2,7 @@
 Circuit Breaker Service - реализация паттерна Circuit Breaker для устойчивости
 """
 import asyncio
+import json
 import time
 from typing import Dict, Any, Optional, Callable, Awaitable
 from enum import Enum
@@ -42,10 +43,30 @@ class CircuitBreaker:
     def _record_failure(self, exception: Exception) -> None:
         """Запись неудачного вызова"""
         current_time = time.time()
+
+        # Безопасно получаем информацию об исключении
+        exception_str = str(exception)
+        exception_type = type(exception).__name__
+
+        # Проверяем, содержит ли исключение информацию, которая может вызвать ошибку
+        try:
+            # Пробуем сериализовать исключение
+            test_data = {
+                "timestamp": current_time,
+                "exception": exception_str,
+                "type": exception_type
+            }
+            json.dumps(test_data)  # Пробуем сериализовать
+        except (TypeError, ValueError) as json_error:
+            self.logger.error(f"Failed to serialize exception data: {json_error}")
+            # Используем упрощенные данные
+            exception_str = f"Error: {exception_str}"
+            exception_type = "Unknown"
+
         self.failure_history.append({
             "timestamp": current_time,
-            "exception": str(exception),
-            "type": type(exception).__name__
+            "exception": exception_str,
+            "type": exception_type
         })
 
         # Ограничиваем историю
@@ -56,6 +77,7 @@ class CircuitBreaker:
         self.last_failure_time = current_time
 
         self.logger.warning(f"Circuit {self.name} recorded failure: {exception}")
+        self.logger.debug(f"Circuit {self.name} failure details - type: {exception_type}, message: {exception_str}")
 
     def _record_success(self) -> None:
         """Запись успешного вызова"""
@@ -96,17 +118,94 @@ class CircuitBreaker:
             "recent_failures": len(self.failure_history[-5:]) if len(self.failure_history) >= 5 else len(self.failure_history)
         }
 
-    async def call(self, func: Callable[[], Awaitable[Any]], *args, **kwargs) -> Any:
-        """Выполнение защищенного вызова"""
+    async def call(self, func: Callable[..., Any], *args, **kwargs) -> Any:
+        """Выполнение защищенного вызова с поддержкой синхронных и асинхронных функций"""
+        self.logger.info(f"Circuit {self.name} call started with function: {func.__name__}")
+        self.logger.info(f"Circuit {self.name} state: {self.state}")
+
         if self.state == CircuitState.OPEN:
             if self._can_attempt_reset():
                 self.state = CircuitState.HALF_OPEN
                 self.logger.info(f"Circuit {self.name} moving to HALF_OPEN state")
             else:
+                self.logger.warning(f"Circuit {self.name} is OPEN, raising exception")
                 raise Exception(f"Circuit {self.name} is OPEN")
 
         try:
-            result = await func(*args, **kwargs)
+            # Проверяем, является ли функция корутиной
+            import asyncio
+            is_async = asyncio.iscoroutinefunction(func)
+            self.logger.info(f"Circuit {self.name} function is async: {is_async}")
+
+            if is_async:
+                self.logger.info(f"Circuit {self.name} calling async function: {func.__name__}")
+                self.logger.info(f"Circuit {self.name} function type: {type(func)}")
+                self.logger.info(f"Circuit {self.name} function args: {args}")
+                self.logger.info(f"Circuit {self.name} function kwargs: {kwargs}")
+
+                try:
+                    result = await func(*args, **kwargs)
+                    self.logger.info(f"Circuit {self.name} async function succeeded, result type: {type(result)}, value: {result}")
+                except Exception as e:
+                    self.logger.error(f"Circuit {self.name} async function failed: {e}")
+                    self.logger.error(f"Exception type: {type(e)}")
+                    raise
+            else:
+                self.logger.info(f"Circuit {self.name} calling sync function: {func.__name__}")
+                self.logger.info(f"Circuit {self.name} function type: {type(func)}")
+                self.logger.info(f"Circuit {self.name} function args: {args}")
+                self.logger.info(f"Circuit {self.name} function kwargs: {kwargs}")
+
+                # Для синхронных функций выполняем их в executor
+                loop = asyncio.get_event_loop()
+                self.logger.info(f"Circuit {self.name} executing sync function in executor")
+
+                # Используем отдельную функцию для выполнения синхронной функции
+                def execute_sync_function():
+                    try:
+                        self.logger.info(f"Executing sync function: {func.__name__}")
+                        self.logger.info(f"Function args: {args}")
+                        self.logger.info(f"Function kwargs: {kwargs}")
+
+                        result = func(*args, **kwargs)
+                        self.logger.info(f"Sync function executed successfully, result: {result} (type: {type(result)})")
+
+                        # Проверяем, не является ли результат bool, который может вызвать проблему
+                        if isinstance(result, bool):
+                            self.logger.warning(f"Sync function returned boolean result: {result} (type: {type(result)})")
+
+                        return result
+                    except Exception as e:
+                        self.logger.error(f"Sync function execution failed: {e}")
+                        self.logger.error(f"Exception type: {type(e)}")
+                        raise
+
+                try:
+                    # Выполняем синхронную функцию в executor и ждем результат
+                    result = await loop.run_in_executor(None, execute_sync_function)
+                    self.logger.info(f"Circuit {self.name} sync function result: {result} (type: {type(result)})")
+
+                    # Проверяем, не является ли результат coroutine (ошибка)
+                    if asyncio.iscoroutine(result):
+                        self.logger.error(f"Circuit {self.name} ERROR: Sync function returned coroutine instead of result!")
+                        # Ждем coroutine чтобы избежать RuntimeWarning
+                        try:
+                            awaited_result = await result
+                            self.logger.warning(f"Circuit {self.name} Coroutine awaited, result: {awaited_result}")
+                            result = awaited_result
+                        except Exception as await_error:
+                            self.logger.error(f"Circuit {self.name} Error awaiting coroutine: {await_error}")
+                            raise await_error
+                    else:
+                        # Результат не является coroutine, это нормально
+                        self.logger.info(f"Circuit {self.name} Sync function returned direct result: {result}")
+
+                except Exception as e:
+                    self.logger.error(f"Circuit {self.name} sync function execution in executor failed: {e}")
+                    self.logger.error(f"Exception type: {type(e)}")
+                    raise
+
+            self.logger.info(f"Circuit {self.name} call succeeded")
             self._record_success()
 
             if self.state == CircuitState.HALF_OPEN:
@@ -119,8 +218,13 @@ class CircuitBreaker:
             return result
 
         except Exception as e:
+            self.logger.error(f"Circuit {self.name} call failed with exception: {e}")
+            self.logger.error(f"Exception type: {type(e)}")
+            self.logger.error(f"Exception args: {e.args}")
+
             # Проверяем тип исключения
             if isinstance(e, self.config.expected_exception):
+                self.logger.info(f"Exception is expected type: {self.config.expected_exception}")
                 self._record_failure(e)
 
                 if self.state == CircuitState.HALF_OPEN:

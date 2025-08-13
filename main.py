@@ -47,16 +47,49 @@ async def init_cache_services():
                     {"host": host.split(":")[0], "port": int(host.split(":")[1])}
                     for host in settings.redis_cluster_nodes.split(",")
                 ]
+                logging.info(f"Creating RedisCluster with {len(startup_nodes)} nodes")
+
+                # Используем правильный формат для RedisCluster
+                from redis.cluster import RedisCluster
+                from redis.cluster import ClusterNode
+
+                # Создаем корректные узлы кластера
+                cluster_nodes = [ClusterNode(host=host.split(":")[0], port=int(host.split(":")[1]))
+                               for host in settings.redis_cluster_nodes.split(",")]
+
                 redis_client = RedisCluster(
-                    startup_nodes=startup_nodes,
+                    startup_nodes=cluster_nodes,
                     password=settings.redis_password,
-                    decode_responses=False,
+                    decode_responses=True,  # Изменено на True для согласованности
                     skip_full_coverage_check=True
                 )
             else:
-                redis_client = redis.from_url(settings.redis_url, decode_responses=False)
+                logging.info(f"Creating Redis client from URL: {settings.redis_url}")
+                redis_client = redis.from_url(settings.redis_url, decode_responses=True)  # Изменено на True для согласованности
 
-            await redis_client.ping()  # Проверка подключения
+            # Проверка подключения
+            logging.info(f"Redis client type: {type(redis_client)}")
+            logging.info(f"Redis client attributes: {[attr for attr in dir(redis_client) if not attr.startswith('_')]}")
+
+            if hasattr(redis_client, 'ping'):
+                if asyncio.iscoroutinefunction(redis_client.ping):
+                    logging.info("Using async ping method")
+                    try:
+                        await redis_client.ping()
+                        logging.info("Redis ping successful")
+                    except Exception as e:
+                        logging.error(f"Redis ping failed: {e}")
+                        raise
+                else:
+                    logging.info("Using sync ping method")
+                    try:
+                        result = redis_client.ping()
+                        logging.info(f"Redis ping result: {result}")
+                    except Exception as e:
+                        logging.error(f"Redis ping failed: {e}")
+                        raise
+            else:
+                logging.warning("Redis client does not have ping method")
 
             # Создаем кеш пользователей
             cache_services['user_cache'] = UserCache(redis_client)
@@ -82,7 +115,7 @@ async def main():
     """Основная функция приложения"""
     # Настройка логирования
     logging.basicConfig(
-        level=getattr(logging, settings.log_level),
+        level=logging.DEBUG,  # Изменено на DEBUG для получения всех сообщений
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 

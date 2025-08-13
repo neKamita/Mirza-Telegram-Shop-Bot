@@ -20,10 +20,6 @@ from redis.exceptions import (
     ConnectionError as RedisConnectionError,  # Псевдоним для избежания конфликта
     ResponseError, DataError
 )
-from tenacity import (
-    retry, stop_after_attempt, wait_exponential,
-    retry_if_exception_type, retry_if_exception, before_sleep_log
-)
 
 from config.settings import settings
 from services.circuit_breaker import circuit_manager, CircuitConfigs
@@ -138,6 +134,9 @@ class SessionCache:
     def __init__(self, redis_client: Any = None):
         self.redis_client = redis_client
         self.logger = logging.getLogger(__name__)
+        self.logger.info(f"SessionCache initializing with redis_client: {redis_client}")
+        self.logger.info(f"Redis client type: {type(redis_client)}")
+
         self.SESSION_PREFIX = "session:"
         self.SESSION_TTL = settings.cache_ttl_session
         self.SESSION_DATA_PREFIX = "session_data:"
@@ -168,31 +167,44 @@ class SessionCache:
             'circuit_breaker_tripped': 0
         }
 
+        self.logger.info("Setting up Redis client...")
         self._setup_redis_client()
 
     def _setup_redis_client(self):
         """Настройка Redis клиента с оптимизированными параметрами"""
         if self.redis_client is None:
             try:
+                self.logger.info(f"Setting up Redis client, is_cluster: {settings.is_redis_cluster}")
+                self.logger.info(f"Redis URL: {settings.redis_url}")
+                self.logger.info(f"Redis Cluster URL: {settings.redis_cluster_url}")
+
                 if settings.is_redis_cluster:
                     # Конфигурация для Redis кластера
+                    cluster_host = settings.redis_cluster_url.split('://')[1].split(':')[0]
+                    cluster_port = int(settings.redis_cluster_url.split(':')[-1])
+
+                    self.logger.info(f"Configuring Redis cluster with host: {cluster_host}, port: {cluster_port}")
+
                     self.redis_client = RedisCluster(
-                        host=settings.redis_cluster_url.split('://')[1].split(':')[0],
-                        port=int(settings.redis_cluster_url.split(':')[-1]),
+                        host=cluster_host,
+                        port=cluster_port,
                         password=settings.redis_password,
                         decode_responses=True,
                         socket_timeout=settings.redis_socket_timeout,
                         socket_connect_timeout=settings.redis_socket_connect_timeout,
-                        retry_on_timeout=settings.redis_retry_on_timeout,
                         max_connections=settings.redis_max_connections,
-                        health_check_interval=settings.redis_health_check_interval,
-                        skip_full_coverage_check=True  # Для производительности
+                        health_check_interval=settings.redis_health_check_interval
                     )
                 else:
                     # Конфигурация для одиночного Redis
+                    redis_host = settings.redis_url.split('://')[1].split(':')[0]
+                    redis_port = int(settings.redis_url.split(':')[-1])
+
+                    self.logger.info(f"Configuring Redis with host: {redis_host}, port: {redis_port}")
+
                     self.redis_client = redis.Redis(
-                        host=settings.redis_url.split('://')[1].split(':')[0],
-                        port=int(settings.redis_url.split(':')[-1]),
+                        host=redis_host,
+                        port=redis_port,
                         password=settings.redis_password,
                         db=settings.redis_db,
                         decode_responses=True,
@@ -203,24 +215,69 @@ class SessionCache:
                         health_check_interval=settings.redis_health_check_interval
                     )
 
-                self.logger.info("Redis client configured successfully")
+                # Проверяем тип клиента и настройки декодирования
+                self.logger.info(f"Redis client type: {type(self.redis_client)}")
+                self.logger.info(f"Redis client configured successfully with decode_responses: {getattr(self.redis_client, 'decode_responses', 'unknown')}")
+
+                # Тестируем соединение (синхронно, так как метод не async)
+                try:
+                    # Проверяем, что у клиента есть метод ping
+                    if hasattr(self.redis_client, 'ping'):
+                        self.logger.info("Redis client ping method available")
+                        # Проверяем, является ли метод ping корутиной
+                        import asyncio
+                        is_ping_async = asyncio.iscoroutinefunction(self.redis_client.ping)
+                        self.logger.info(f"Redis client ping method is async: {is_ping_async}")
+
+                        # Проверяем, что возвращает метод ping
+                        try:
+                            if is_ping_async:
+                                # Используем event loop для асинхронного ping
+                                loop = asyncio.get_event_loop()
+                                ping_result = loop.run_until_complete(self.redis_client.ping())
+                            else:
+                                ping_result = self.redis_client.ping()
+                            self.logger.info(f"Redis ping result: {ping_result} (type: {type(ping_result)})")
+                        except Exception as ping_error:
+                            self.logger.error(f"Redis ping execution failed: {ping_error}")
+                            raise
+                    else:
+                        self.logger.warning("Redis client ping method not available")
+                except Exception as ping_error:
+                    self.logger.error(f"Redis ping test failed: {ping_error}")
+                    raise
 
             except Exception as e:
                 self.logger.error(f"Failed to configure Redis client: {e}")
+                self.logger.error(f"Error type: {type(e)}")
+                import traceback
+                self.logger.error(f"Traceback: {traceback.format_exc()}")
                 self.redis_healthy = False
                 self.last_redis_error = e
+        else:
+            self.logger.info(f"Using provided Redis client: {type(self.redis_client)}")
+            # Проверяем, что у клиента есть метод ping
+            if hasattr(self.redis_client, 'ping'):
+                self.logger.info("Redis client ping method available")
+                # Проверяем, является ли метод ping корутиной
+                import asyncio
+                is_ping_async = asyncio.iscoroutinefunction(self.redis_client.ping)
+                self.logger.info(f"Redis client ping method is async: {is_ping_async}")
 
-    @retry(
-        stop=stop_after_attempt(settings.redis_retry_attempts),
-        wait=wait_exponential(
-            multiplier=settings.redis_retry_backoff_factor,
-            min=1,
-            max=10
-        ),
-        retry=retry_if_exception(lambda e: isinstance(e, SessionCache.RETRIABLE_EXCEPTIONS)),
-        before_sleep=before_sleep_log(logging.getLogger(__name__), logging.WARNING),
-        reraise=True
-    )
+                # Проверяем, что возвращает метод ping
+                try:
+                    if is_ping_async:
+                        # Используем event loop для асинхронного ping
+                        loop = asyncio.get_event_loop()
+                        ping_result = loop.run_until_complete(self.redis_client.ping())
+                    else:
+                        ping_result = self.redis_client.ping()
+                    self.logger.info(f"Redis ping result: {ping_result} (type: {type(ping_result)})")
+                except Exception as ping_error:
+                    self.logger.error(f"Redis ping execution failed: {ping_error}")
+            else:
+                self.logger.warning("Redis client ping method not available")
+
     async def _execute_redis_operation(self, operation: str, *args, **kwargs) -> Any:
         """Выполнение Redis операции с retry и Circuit Breaker"""
 
@@ -230,11 +287,59 @@ class SessionCache:
 
         # Оборачиваем в Circuit Breaker
         try:
-            result = await self.circuit_breaker.call(
-                getattr(self.redis_client, operation),
-                *args, **kwargs
-            )
+            self.logger.info(f"Executing Redis operation: {operation}")
 
+            # Проверяем тип Redis клиента
+            self.logger.info(f"Redis client type: {type(self.redis_client)}")
+            self.logger.info(f"Redis client module: {self.redis_client.__class__.__module__}")
+
+            # Для AsyncRedisCluster всегда используем async методы с префиксом 'a'
+            async_method = f'a{operation}'
+
+            if hasattr(self.redis_client, async_method):
+                # Используем async метод с префиксом 'a'
+                redis_async_method = getattr(self.redis_client, async_method)
+                self.logger.info(f"Using async method: {async_method}")
+                self.logger.info(f"Circuit breaker call with async method: {async_method}")
+                self.logger.info(f"Circuit breaker type: {type(self.circuit_breaker)}")
+                self.logger.info(f"Circuit breaker call method: {self.circuit_breaker.call}")
+
+                # Дополнительная проверка перед вызовом
+                self.logger.info(f"About to call circuit_breaker.call with async method: {async_method}")
+                self.logger.info(f"Circuit breaker state before call: {self.circuit_breaker.get_state()}")
+
+                try:
+                    result = await self.circuit_breaker.call(
+                        redis_async_method,
+                        *args, **kwargs
+                    )
+                    self.logger.info(f"Async method call succeeded, result type: {type(result)}, value: {result}")
+                except Exception as e:
+                    self.logger.error(f"Async method call failed: {e}")
+                    self.logger.error(f"Exception type: {type(e)}")
+                    raise
+            else:
+                # Fallback на обычный метод если async версия не найдена
+                redis_method = getattr(self.redis_client, operation)
+                self.logger.info(f"Async method {async_method} not found, using fallback method: {operation}")
+                self.logger.info(f"Using asyncio.to_thread for sync method: {operation}")
+
+                # Создаем оберточную функцию для Circuit Breaker
+                def wrapped_redis_operation():
+                    self.logger.info(f"Executing Redis operation: {operation}")
+                    try:
+                        result = redis_method(*args, **kwargs)
+                        self.logger.info(f"Redis operation {operation} succeeded, result: {result} (type: {type(result)})")
+                        return result
+                    except Exception as e:
+                        self.logger.error(f"Redis operation {operation} failed: {e}")
+                        raise
+
+                # Используем asyncio.to_thread для синхронной операции
+                result = await asyncio.to_thread(wrapped_redis_operation)
+                self.logger.info(f"Redis operation {operation} completed in to_thread, result: {result} (type: {type(result)})")
+
+            self.logger.info(f"Redis operation {operation} completed successfully, result type: {type(result)}")
             # Обновляем статистику при успехе
             self.stats['redis_hits'] += 1
             return result
@@ -246,6 +351,10 @@ class SessionCache:
 
         except Exception as e:
             # Прочие ошибки
+            self.logger.error(f"Error in _execute_redis_operation: {e}")
+            self.logger.error(f"Error type: {type(e)}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             self._handle_redis_error(e)
             raise
 
@@ -304,12 +413,66 @@ class SessionCache:
             if self.redis_healthy:
                 try:
                     serialized = json.dumps(session_data, default=str)
+
+                    # Проверяем, является ли метод setex асинхронным
+                    import asyncio
+                    setex_method = getattr(self.redis_client, 'setex')
+                    self.logger.info(f"setex method: {setex_method}, type: {type(setex_method)}")
+                    self.logger.info(f"setex is async: {asyncio.iscoroutinefunction(setex_method)}")
+
+                    # Проверяем, что возвращает setex метод
+                    try:
+                        if asyncio.iscoroutinefunction(setex_method):
+                            test_result = asyncio.get_event_loop().run_until_complete(setex_method(session_key, self.SESSION_TTL, serialized))
+                        else:
+                            test_result = setex_method(session_key, self.SESSION_TTL, serialized)
+                        self.logger.info(f"setex method test result: {test_result} (type: {type(test_result)})")
+                    except Exception as setex_test_error:
+                        self.logger.error(f"setex method test failed: {setex_test_error}")
+
+                    # Проверяем, является ли метод lpush асинхронным
+                    lpush_method = getattr(self.redis_client, 'lpush')
+                    self.logger.info(f"lpush method: {lpush_method}, type: {type(lpush_method)}")
+                    self.logger.info(f"lpush is async: {asyncio.iscoroutinefunction(lpush_method)}")
+
+                    # Проверяем, что возвращает lpush метод
+                    try:
+                        if asyncio.iscoroutinefunction(lpush_method):
+                            test_result = asyncio.get_event_loop().run_until_complete(lpush_method(f"user_sessions:{user_id}", session_id))
+                        else:
+                            test_result = lpush_method(f"user_sessions:{user_id}", session_id)
+                        self.logger.info(f"lpush method test result: {test_result} (type: {type(test_result)})")
+                    except Exception as lpush_test_error:
+                        self.logger.error(f"lpush method test failed: {lpush_test_error}")
+
+                    # Проверяем, является ли метод expire асинхронным
+                    expire_method = getattr(self.redis_client, 'expire')
+                    self.logger.info(f"expire method: {expire_method}, type: {type(expire_method)}")
+                    self.logger.info(f"expire is async: {asyncio.iscoroutinefunction(expire_method)}")
+
+                    # Проверяем, что возвращает expire метод
+                    try:
+                        if asyncio.iscoroutinefunction(expire_method):
+                            test_result = asyncio.get_event_loop().run_until_complete(expire_method(f"user_sessions:{user_id}", self.SESSION_TTL))
+                        else:
+                            test_result = expire_method(f"user_sessions:{user_id}", self.SESSION_TTL)
+                        self.logger.info(f"expire method test result: {test_result} (type: {type(test_result)})")
+                    except Exception as expire_test_error:
+                        self.logger.error(f"expire method test failed: {expire_test_error}")
+
+                    self.logger.info(f"About to call setex operation for session: {session_id}")
                     await self._execute_redis_operation('setex', session_key, self.SESSION_TTL, serialized)
+                    self.logger.info(f"setex operation completed for session: {session_id}")
 
                     # Индексируем сессии по пользователю
                     user_sessions_key = f"user_sessions:{user_id}"
+                    self.logger.info(f"About to call lpush operation for user_sessions_key: {user_sessions_key}")
                     await self._execute_redis_operation('lpush', user_sessions_key, session_id)
+                    self.logger.info(f"lpush operation completed for user_sessions_key: {user_sessions_key}")
+
+                    self.logger.info(f"About to call expire operation for user_sessions_key: {user_sessions_key}")
                     await self._execute_redis_operation('expire', user_sessions_key, self.SESSION_TTL)
+                    self.logger.info(f"expire operation completed for user_sessions_key: {user_sessions_key}")
 
                     self.logger.info(f"Created session {session_id} for user {user_id} in Redis")
 
@@ -350,13 +513,20 @@ class SessionCache:
     async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Получение сессии по ID с graceful degradation"""
         cache_key = self._get_cache_key(session_id)
+        self.logger.debug(f"Getting session for ID: {session_id}, cache_key: {cache_key}")
+
+        # Проверяем, является ли метод get асинхронным
+        import asyncio
+        get_method = getattr(self.redis_client, 'get')
+        self.logger.info(f"get method: {get_method}, type: {type(get_method)}")
+        self.logger.info(f"get is async: {asyncio.iscoroutinefunction(get_method)}")
 
         # Сначала пробуем локальный кэш
         if self.local_cache:
             local_data = self.local_cache.get(cache_key)
             if local_data:
                 self.stats['local_cache_hits'] += 1
-                self.logger.debug(f"Session {session_id} found in local cache")
+                self.logger.debug(f"Session {session_id} found in local cache: {local_data}")
                 return local_data
             self.stats['local_cache_misses'] += 1
 
@@ -364,34 +534,58 @@ class SessionCache:
         if self.redis_healthy:
             try:
                 session_key = f"{self.SESSION_PREFIX}{session_id}"
+                self.logger.debug(f"Getting session from Redis, key: {session_key}")
+
                 cached_data = await self._execute_redis_operation('get', session_key)
+                self.logger.debug(f"Raw cached data from Redis: {cached_data} (type: {type(cached_data)})")
 
                 if cached_data:
-                    session_data = json.loads(cached_data)
+                    try:
+                        session_data = json.loads(cached_data)
+                        self.logger.debug(f"Parsed session data: {session_data} (type: {type(session_data)})")
 
-                    # Проверяем активность и свежесть
-                    if session_data.get('is_active') and self._is_session_valid(session_data):
-                        # Обновляем время последней активности
-                        session_data['last_activity'] = datetime.utcnow().isoformat()
-                        await self.update_session(session_id, session_data)
+                        # Проверяем, что это словарь
+                        if not isinstance(session_data, dict):
+                            self.logger.error(f"Expected dict but got {type(session_data)} for session {session_id}")
+                            return None
 
-                        # Кэшируем в локальном хранилище
-                        if self.local_cache:
-                            self.local_cache.set(cache_key, session_data)
+                        # Проверяем активность и свежесть
+                        if session_data.get('is_active') and self._is_session_valid(session_data):
+                            # Обновляем время последней активности
+                            session_data['last_activity'] = datetime.utcnow().isoformat()
+                            await self.update_session(session_id, session_data)
 
-                        return session_data
-                    else:
-                        # Сессия неактивна или устарела
-                        await self.delete_session(session_id)
+                            # Кэшируем в локальном хранилище
+                            if self.local_cache:
+                                self.local_cache.set(cache_key, session_data)
 
+                            self.logger.debug(f"Returning valid session data for {session_id}")
+                            return session_data
+                        else:
+                            # Сессия неактивна или устарела
+                            self.logger.debug(f"Session {session_id} is inactive or expired")
+                            await self.delete_session(session_id)
+
+                    except json.JSONDecodeError as json_error:
+                        self.logger.error(f"JSON decode error for session {session_id}: {json_error}")
+                        return None
+                    except Exception as parse_error:
+                        self.logger.error(f"Error parsing session data for {session_id}: {parse_error}")
+                        return None
+
+                self.logger.debug(f"No session found in Redis for {session_id}")
                 return None
 
             except Exception as e:
-                self.logger.warning(f"Failed to get session from Redis, using local cache: {e}")
+                self.logger.error(f"Failed to get session from Redis: {e}")
+                self.logger.error(f"Error type: {type(e)}")
+                import traceback
+                self.logger.error(f"Traceback: {traceback.format_exc()}")
                 # При ошибке Redis пробуем локальный кэш еще раз
                 if self.local_cache:
                     return self.local_cache.get(cache_key)
 
+        self.logger.debug(f"No session found for {session_id}")
         return None
 
     async def update_session(self, session_id: str, session_data: Dict[str, Any]) -> bool:
@@ -486,18 +680,43 @@ class SessionCache:
         if self.redis_healthy:
             try:
                 user_sessions_key = f"user_sessions:{user_id}"
+                self.logger.debug(f"Getting user sessions for user {user_id}, key: {user_sessions_key}")
+
                 session_ids = await self._execute_redis_operation('lrange', user_sessions_key, 0, -1)
+                self.logger.debug(f"Found {len(session_ids)} session IDs for user {user_id}")
 
                 for session_id_bytes in session_ids:
-                    session_id = session_id_bytes.decode('utf-8')
-                    session = await self.get_session(session_id)
-                    if session:
-                        sessions.append(session)
+                    try:
+                        # Проверяем тип данных session_id_bytes
+                        self.logger.debug(f"Processing session_id_bytes: {type(session_id_bytes)}, value: {session_id_bytes}")
 
+                        # Декодируем только если это байты
+                        if isinstance(session_id_bytes, bytes):
+                            session_id = session_id_bytes.decode('utf-8')
+                        else:
+                            session_id = str(session_id_bytes)
+
+                        self.logger.debug(f"Processing session ID: {session_id}")
+
+                        session = await self.get_session(session_id)
+                        if session:
+                            self.logger.debug(f"Found session for {session_id}: {session}")
+                            sessions.append(session)
+                        else:
+                            self.logger.debug(f"No session found for ID: {session_id}")
+
+                    except Exception as session_error:
+                        self.logger.error(f"Error processing session ID {session_id_bytes}: {session_error}")
+                        continue
+
+                self.logger.info(f"Retrieved {len(sessions)} sessions for user {user_id} from Redis")
                 return sessions
 
             except Exception as e:
-                self.logger.warning(f"Failed to get user sessions from Redis, using local cache: {e}")
+                self.logger.error(f"Failed to get user sessions from Redis: {e}")
+                self.logger.error(f"Error type: {type(e)}")
+                import traceback
+                self.logger.error(f"Traceback: {traceback.format_exc()}")
 
         # Локальное кэширование
         if hasattr(self, '_local_user_sessions'):
@@ -779,11 +998,39 @@ class SessionCache:
             if self.redis_healthy and self.redis_client:
                 try:
                     # Простая проверка пинга
-                    await self.redis_client.ping()
-                    health_status['redis_status'] = 'connected'
+                    self.logger.info(f"Attempting to ping Redis client: {type(self.redis_client)}")
+
+                    # Проверяем, является ли метод ping корутиной
+                    import asyncio
+                    ping_method = getattr(self.redis_client, 'ping')
+                    self.logger.info(f"ping method: {ping_method}, type: {type(ping_method)}")
+                    self.logger.info(f"ping is async: {asyncio.iscoroutinefunction(ping_method)}")
+
+                    # Проверяем, является ли метод ping асинхронным
+                    import asyncio
+                    ping_method = getattr(self.redis_client, 'ping')
+                    self.logger.info(f"ping method: {ping_method}, type: {type(ping_method)}")
+                    self.logger.info(f"ping is async: {asyncio.iscoroutinefunction(ping_method)}")
+
+                    if asyncio.iscoroutinefunction(ping_method):
+                        self.logger.info("Using async ping method")
+                        await ping_method()
+                        health_status['redis_status'] = 'connected'
+                    else:
+                        self.logger.info("Using sync ping method in async context")
+                        # Используем executor для синхронного метода
+                        loop = asyncio.get_event_loop()
+                        result = await loop.run_in_executor(None, ping_method)
+                        self.logger.info(f"Sync ping result: {result}")
+                        health_status['redis_status'] = 'connected'
+
                 except Exception as e:
                     health_status['redis_status'] = 'error'
                     health_status['last_error'] = str(e)
+                    self.logger.error(f"Redis ping error: {e}")
+                    self.logger.error(f"Error type: {type(e)}")
+                    import traceback
+                    self.logger.error(f"Traceback: {traceback.format_exc()}")
                     self.redis_healthy = False
 
             # Определяем общий статус
@@ -814,19 +1061,41 @@ class SessionCache:
             if self.redis_healthy:
                 try:
                     session_keys = await self._execute_redis_operation('keys', f"{self.SESSION_PREFIX}*")
+                    self.logger.debug(f"Found {len(session_keys)} session keys to check for expiration")
 
                     for key in session_keys:
-                        session_id = key.decode('utf-8').replace(self.SESSION_PREFIX, '')
-                        session = await self.get_session(session_id)
+                        try:
+                            # Проверяем тип ключа
+                            self.logger.debug(f"Processing session key: {type(key)}, value: {key}")
 
-                        if session and not self._is_session_valid(session):
-                            await self.delete_session(session_id)
-                            cleaned_count += 1
+                            # Декодируем только если это байты
+                            if isinstance(key, bytes):
+                                session_id = key.decode('utf-8').replace(self.SESSION_PREFIX, '')
+                            else:
+                                session_id = str(key).replace(self.SESSION_PREFIX, '')
+
+                            self.logger.debug(f"Checking session for expiration: {session_id}")
+
+                            session = await self.get_session(session_id)
+
+                            if session and not self._is_session_valid(session):
+                                self.logger.info(f"Cleaning up expired session: {session_id}")
+                                await self.delete_session(session_id)
+                                cleaned_count += 1
+                            elif session:
+                                self.logger.debug(f"Session {session_id} is still valid")
+
+                        except Exception as key_error:
+                            self.logger.error(f"Error processing session key {key}: {key_error}")
+                            continue
 
                     self.logger.info(f"Cleaned up {cleaned_count} expired sessions from Redis")
 
                 except Exception as e:
-                    self.logger.warning(f"Failed to cleanup expired sessions from Redis: {e}")
+                    self.logger.error(f"Failed to cleanup expired sessions from Redis: {e}")
+                    self.logger.error(f"Error type: {type(e)}")
+                    import traceback
+                    self.logger.error(f"Traceback: {traceback.format_exc()}")
 
             # Очистка локального кэша
             if self.local_cache:
@@ -837,4 +1106,41 @@ class SessionCache:
 
         except Exception as e:
             self.logger.error(f"Error during cleanup: {e}")
+            self.logger.error(f"Error type: {type(e)}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             return 0
+
+    async def initialize(self):
+        """Инициализация Redis кластера"""
+        if self.redis_healthy and settings.is_redis_cluster:
+            try:
+                self.logger.info("Redis cluster configuration completed")
+                self.logger.info("Redis client will be initialized on first operation")
+
+            except Exception as e:
+                self.logger.error(f"Redis cluster initialization setup failed: {e}")
+                # Не прерываем работу, просто продолжаем с текущим состоянием
+
+    async def cleanup(self):
+        """Очистка ресурсов и закрытие соединений"""
+        try:
+            if self.redis_client:
+                # Пытаемся закрыть соединение, если возможно
+                try:
+                    import asyncio
+                    if hasattr(self.redis_client, 'close'):
+                        if asyncio.iscoroutinefunction(self.redis_client.close):
+                            await self.redis_client.close()
+                        else:
+                            # Для синхронной версии используем executor
+                            loop = asyncio.get_event_loop()
+                            await loop.run_in_executor(None, self.redis_client.close)
+                        self.logger.info("Redis connection closed successfully")
+                    else:
+                        self.logger.info("No explicit close method available for Redis client")
+                except Exception as close_error:
+                    self.logger.warning(f"Error closing Redis connection: {close_error}")
+
+        except Exception as e:
+            self.logger.error(f"Error during Redis cleanup: {e}")
