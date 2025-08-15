@@ -106,7 +106,7 @@ class Settings:
         self.recharge_transaction_type: str = os.getenv("RECHARGE_TRANSACTION_TYPE", "recharge")
 
         # Webhook Configuration
-        self.webhook_secret: str = os.getenv("WEBHOOK_SECRET", "your-webhook-secret-key")
+        self.webhook_secret: str = os.getenv("WEBHOOK_SECRET", "")
         self.webhook_path: str = os.getenv("WEBHOOK_PATH", "/webhook/heleket")
         self.webhook_host: str = os.getenv("WEBHOOK_HOST", "0.0.0.0")
         self.webhook_port: int = int(os.getenv("WEBHOOK_PORT", "8001"))

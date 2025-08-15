@@ -3,6 +3,7 @@ Payment Cache Service - специализированный сервис для
 """
 import json
 import logging
+import asyncio
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 import redis.asyncio as redis
@@ -289,12 +290,46 @@ class PaymentCache:
             self.logger.error(f"Error getting payment stats: {e}")
             return {}
 
+    async def _execute_redis_operation(self, operation: str, *args, **kwargs) -> Any:
+        """
+        Универсальный метод для выполнения Redis операций с поддержкой
+        как синхронных, так и асинхронных клиентов
+        
+        Args:
+            operation: Название операции (get, set, lpush, lrem и т.д.)
+            *args: Аргументы операции
+            **kwargs: Именованные аргументы операции
+            
+        Returns:
+            Результат операции
+        """
+        try:
+            # Получаем метод Redis клиента
+            method = getattr(self.redis_client, operation)
+            
+            # Проверяем, является ли метод асинхронным
+            if asyncio.iscoroutinefunction(method):
+                # Используем async метод
+                return await method(*args, **kwargs)
+            else:
+                # Для синхронного метода используем asyncio.to_thread
+                def wrapped_method():
+                    return method(*args, **kwargs)
+                
+                return await asyncio.to_thread(wrapped_method)
+                
+        except Exception as e:
+            self.logger.error(f"Error executing Redis operation {operation}: {e}")
+            raise
+
     async def _update_payment_status_index(self, payment_id: str, status: str) -> None:
         """Обновление индекса статусов платежей"""
         try:
             index_key = f"payment_status_index:{status}"
-            await self.redis_client.lpush(index_key, payment_id)
-            await self.redis_client.expire(index_key, self.STATUS_TTL)
+            # Убеждаемся, что payment_id - это строка для Redis
+            payment_id_str = str(payment_id)
+            await self._execute_redis_operation('lpush', index_key, payment_id_str)
+            await self._execute_redis_operation('expire', index_key, self.STATUS_TTL)
         except Exception as e:
             self.logger.error(f"Error updating payment status index: {e}")
 
@@ -306,7 +341,9 @@ class PaymentCache:
 
             for status in statuses:
                 index_key = f"payment_status_index:{status}"
-                await self.redis_client.lrem(index_key, 0, payment_id)
+                # Убеждаемся, что payment_id - это строка для Redis
+                payment_id_str = str(payment_id)
+                await self._execute_redis_operation('lrem', index_key, 0, payment_id_str)
         except Exception as e:
             self.logger.error(f"Error removing payment from indices: {e}")
 

@@ -437,10 +437,12 @@ class SessionCache:
 
                     # Проверяем, что возвращает lpush метод
                     try:
+                        # Убеждаемся, что session_id - это строка для Redis
+                        session_id_str = str(session_id)
                         if asyncio.iscoroutinefunction(lpush_method):
-                            test_result = asyncio.get_event_loop().run_until_complete(lpush_method(f"user_sessions:{user_id}", session_id))
+                            test_result = asyncio.get_event_loop().run_until_complete(lpush_method(f"user_sessions:{user_id}", session_id_str))
                         else:
-                            test_result = lpush_method(f"user_sessions:{user_id}", session_id)
+                            test_result = lpush_method(f"user_sessions:{user_id}", session_id_str)
                         self.logger.info(f"lpush method test result: {test_result} (type: {type(test_result)})")
                     except Exception as lpush_test_error:
                         self.logger.error(f"lpush method test failed: {lpush_test_error}")
@@ -467,7 +469,9 @@ class SessionCache:
                     # Индексируем сессии по пользователю
                     user_sessions_key = f"user_sessions:{user_id}"
                     self.logger.info(f"About to call lpush operation for user_sessions_key: {user_sessions_key}")
-                    await self._execute_redis_operation('lpush', user_sessions_key, session_id)
+                    # Убеждаемся, что session_id - это строка для Redis
+                    session_id_str = str(session_id)
+                    await self._execute_redis_operation('lpush', user_sessions_key, session_id_str)
                     self.logger.info(f"lpush operation completed for user_sessions_key: {user_sessions_key}")
 
                     self.logger.info(f"About to call expire operation for user_sessions_key: {user_sessions_key}")
@@ -662,7 +666,9 @@ class SessionCache:
         """Удаление сессии из индекса пользователя в Redis"""
         if session_data and 'user_id' in session_data:
             user_sessions_key = f"user_sessions:{session_data['user_id']}"
-            await self._execute_redis_operation('lrem', user_sessions_key, 0, session_id)
+            # Убеждаемся, что session_id - это строка для Redis
+            session_id_str = str(session_id)
+            await self._execute_redis_operation('lrem', user_sessions_key, 0, session_id_str)
 
     def _remove_from_local_user_index(self, session_id: str):
         """Удаление сессии из локального индекса пользователя"""

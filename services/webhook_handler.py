@@ -22,14 +22,6 @@ from services.payment_cache import PaymentCache
 class WebhookHandler:
     """Обработчик вебхуков от Heleket"""
 
-    def __init__(self, star_purchase_service: StarPurchaseService,
-                 user_cache: Optional[UserCache] = None,
-                 payment_cache: Optional[PaymentCache] = None):
-        self.star_purchase_service = star_purchase_service
-        self.user_cache = user_cache
-        self.payment_cache = payment_cache
-        self.logger = logging.getLogger(__name__)
-
     async def handle_payment_webhook(self, request: Request) -> JSONResponse:
         """Обработка вебхука от платежной системы"""
         try:
@@ -107,11 +99,24 @@ class WebhookHandler:
             self.logger.error(f"Error validating webhook signature: {e}")
             return False
 
+    def __init__(self, star_purchase_service: StarPurchaseService,
+                 user_cache: Optional[UserCache] = None,
+                 payment_cache: Optional[PaymentCache] = None,
+                 webhook_secret: str = ""):
+        self.star_purchase_service = star_purchase_service
+        self.user_cache = user_cache
+        self.payment_cache = payment_cache
+        self.webhook_secret = webhook_secret
+        self.logger = logging.getLogger(__name__)
+
     def _calculate_signature(self, body: bytes) -> str:
         """Вычисление HMAC подписи для вебхука"""
-        # В реальном проекте здесь должна быть логика вычисления подписи
-        # using secret key from Heleket
-        secret_key = b"your-secret-key-here"  # Должен храниться в конфигурации
+        # Используем секретный ключ из конфигурации
+        secret_key = self.webhook_secret.encode('utf-8') if self.webhook_secret else b""
+
+        if not secret_key:
+            self.logger.warning("Webhook secret is not configured")
+            return ""
 
         signature = hmac.new(
             secret_key,
@@ -132,7 +137,8 @@ class WebhookHandlerFactory:
         balance_repository: BalanceRepository,
         payment_service,  # PaymentService
         user_cache: Optional[UserCache] = None,
-        payment_cache: Optional[PaymentCache] = None
+        payment_cache: Optional[PaymentCache] = None,
+        webhook_secret: str = ""
     ) -> WebhookHandler:
         """Создание обработчика вебхуков"""
 
@@ -149,5 +155,6 @@ class WebhookHandlerFactory:
         return WebhookHandler(
             star_purchase_service=star_purchase_service,
             user_cache=user_cache,
-            payment_cache=payment_cache
+            payment_cache=payment_cache,
+            webhook_secret=webhook_secret
         )
