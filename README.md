@@ -235,41 +235,21 @@ erDiagram
 **Детализированная схема базы данных:**
 
 ```mermaid
-graph TB
-    subgraph "👤 USERS"
-        U1[user_id - INTEGER PK]
-        U2[username - VARCHAR]
-        U3[first_name - VARCHAR]
-        U4[last_name - VARCHAR]
-        U5[created_at - DATETIME]
-        U6[updated_at - DATETIME]
+graph LR
+    subgraph USERS ["👤 USERS TABLE"]
+        U_FIELDS["🔑 user_id (PK) - INTEGER<br/>📝 username - VARCHAR<br/>👤 first_name - VARCHAR<br/>👤 last_name - VARCHAR<br/>📅 created_at - DATETIME<br/>📅 updated_at - DATETIME"]
     end
     
-    subgraph "💰 BALANCES"
-        B1[id - INTEGER PK]
-        B2[user_id - INTEGER FK]
-        B3[amount - DECIMAL]
-        B4[currency - VARCHAR]
-        B5[created_at - DATETIME]
-        B6[updated_at - DATETIME]
+    subgraph BALANCES ["💰 BALANCES TABLE"]
+        B_FIELDS["🔑 id (PK) - INTEGER<br/>🔗 user_id (FK) - INTEGER<br/>💵 amount - DECIMAL<br/>💱 currency - VARCHAR<br/>📅 created_at - DATETIME<br/>📅 updated_at - DATETIME"]
     end
     
-    subgraph "📊 TRANSACTIONS"
-        T1[id - INTEGER PK]
-        T2[user_id - INTEGER FK]
-        T3[transaction_type - ENUM]
-        T4[status - ENUM]
-        T5[amount - DECIMAL]
-        T6[currency - VARCHAR]
-        T7[description - VARCHAR]
-        T8[external_id - VARCHAR UK]
-        T9[transaction_metadata - TEXT]
-        T10[created_at - DATETIME]
-        T11[updated_at - DATETIME]
+    subgraph TRANSACTIONS ["📊 TRANSACTIONS TABLE"]
+        T_FIELDS["🔑 id (PK) - INTEGER<br/>🔗 user_id (FK) - INTEGER<br/>📋 transaction_type - ENUM<br/>📊 status - ENUM<br/>💵 amount - DECIMAL<br/>💱 currency - VARCHAR<br/>📝 description - VARCHAR<br/>🔒 external_id (UK) - VARCHAR<br/>📄 transaction_metadata - TEXT<br/>📅 created_at - DATETIME<br/>📅 updated_at - DATETIME"]
     end
     
-    U1 -.->|1:1| B2
-    U1 -.->|1:N| T2
+    USERS -.->|"1:1 has balance"| BALANCES
+    USERS -.->|"1:N makes transactions"| TRANSACTIONS
 ```
 
 ### Описание таблиц
