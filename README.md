@@ -235,41 +235,41 @@ erDiagram
 **Детализированная схема базы данных:**
 
 ```mermaid
-classDiagram
-    class USERS {
-        +INTEGER user_id
-        +VARCHAR username
-        +VARCHAR first_name
-        +VARCHAR last_name
-        +DATETIME created_at
-        +DATETIME updated_at
-    }
+graph TB
+    subgraph "👤 USERS"
+        U1[user_id - INTEGER PK]
+        U2[username - VARCHAR]
+        U3[first_name - VARCHAR]
+        U4[last_name - VARCHAR]
+        U5[created_at - DATETIME]
+        U6[updated_at - DATETIME]
+    end
     
-    class BALANCES {
-        +INTEGER id
-        +INTEGER user_id
-        +DECIMAL amount
-        +VARCHAR currency
-        +DATETIME created_at
-        +DATETIME updated_at
-    }
+    subgraph "💰 BALANCES"
+        B1[id - INTEGER PK]
+        B2[user_id - INTEGER FK]
+        B3[amount - DECIMAL]
+        B4[currency - VARCHAR]
+        B5[created_at - DATETIME]
+        B6[updated_at - DATETIME]
+    end
     
-    class TRANSACTIONS {
-        +INTEGER id
-        +INTEGER user_id
-        +ENUM transaction_type
-        +ENUM status
-        +DECIMAL amount
-        +VARCHAR currency
-        +VARCHAR description
-        +VARCHAR external_id
-        +TEXT transaction_metadata
-        +DATETIME created_at
-        +DATETIME updated_at
-    }
+    subgraph "📊 TRANSACTIONS"
+        T1[id - INTEGER PK]
+        T2[user_id - INTEGER FK]
+        T3[transaction_type - ENUM]
+        T4[status - ENUM]
+        T5[amount - DECIMAL]
+        T6[currency - VARCHAR]
+        T7[description - VARCHAR]
+        T8[external_id - VARCHAR UK]
+        T9[transaction_metadata - TEXT]
+        T10[created_at - DATETIME]
+        T11[updated_at - DATETIME]
+    end
     
-    USERS ||--|| BALANCES
-    USERS ||--o{ TRANSACTIONS
+    U1 -.->|1:1| B2
+    U1 -.->|1:N| T2
 ```
 
 ### Описание таблиц
