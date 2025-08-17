@@ -549,9 +549,104 @@ class StarPurchaseService(StarPurchaseServiceInterface):
             self.logger.error(f"Error cancelling purchase {transaction_id} for user {user_id}: {e}")
             return False
 
+    async def cancel_specific_recharge(self, user_id: int, payment_uuid: str) -> bool:
+        """Отмена конкретного пополнения по UUID платежа"""
+        try:
+            # Получаем все pending транзакции пополнения пользователя
+            pending_recharges = await self.balance_repository.get_user_transactions(
+                user_id=user_id,
+                transaction_type=TransactionType.RECHARGE,
+                status=TransactionStatus.PENDING
+            )
+            
+            # Ищем транзакцию с нужным payment_uuid в метаданных
+            transaction_data = None
+            for transaction in pending_recharges:
+                metadata = transaction.get("metadata", {})
+                if isinstance(metadata, dict) and metadata.get("payment_uuid") == payment_uuid:
+                    transaction_data = transaction
+                    break
+            
+            if not transaction_data:
+                self.logger.warning(f"Transaction not found for payment UUID {payment_uuid}")
+                return False
+
+            # Проверяем, что это транзакция данного пользователя
+            if transaction_data["user_id"] != user_id:
+                self.logger.warning(f"Transaction {payment_uuid} does not belong to user {user_id}")
+                return False
+
+            # Проверяем статус
+            if transaction_data["status"] != "pending":
+                self.logger.info(f"Transaction {payment_uuid} is not pending, current status: {transaction_data['status']}")
+                return False
+
+            # Отменяем транзакцию
+            success = await self.balance_repository.update_transaction_status(
+                transaction_data["id"],
+                TransactionStatus.CANCELLED,
+                metadata={
+                    "cancelled_at": datetime.utcnow().isoformat(),
+                    "cancelled_by": "user_back_button",
+                    "reason": "User pressed back button for specific invoice",
+                    "payment_uuid": payment_uuid
+                }
+            )
+            
+            if success:
+                self.logger.info(f"Cancelled specific recharge transaction {transaction_data['id']} (UUID: {payment_uuid}) for user {user_id}")
+                
+                # Инвалидируем кеш пользователя
+                if self.user_cache:
+                    await self.user_cache.invalidate_user_cache(user_id)
+
+            return success
+
+        except Exception as e:
+            self.logger.error(f"Error cancelling specific recharge {payment_uuid} for user {user_id}: {e}")
+            return False
+
+    async def cancel_pending_recharges(self, user_id: int) -> int:
+        """Отмена всех ожидающих обработки пополнений пользователя"""
+        try:
+            # Получаем все pending транзакции пополнения для пользователя
+            pending_recharges = await self.balance_repository.get_user_transactions(
+                user_id=user_id,
+                transaction_type=TransactionType.RECHARGE,
+                status=TransactionStatus.PENDING
+            )
+
+            cancelled_count = 0
+            for transaction in pending_recharges:
+                # Отменяем каждую транзакцию
+                success = await self.balance_repository.update_transaction_status(
+                    transaction["id"],
+                    TransactionStatus.CANCELLED,
+                    metadata={
+                        "cancelled_at": datetime.utcnow().isoformat(),
+                        "cancelled_by": "user_back_button",
+                        "reason": "User pressed back button"
+                    }
+                )
+                
+                if success:
+                    cancelled_count += 1
+                    self.logger.info(f"Cancelled pending recharge transaction {transaction['id']} for user {user_id}")
+
+            # Инвалидируем кеш пользователя если были отменены транзакции
+            if cancelled_count > 0 and self.user_cache:
+                await self.user_cache.invalidate_user_cache(user_id)
+
+            return cancelled_count
+
+        except Exception as e:
+            self.logger.error(f"Error cancelling pending recharges for user {user_id}: {e}")
+            return 0
+
     async def create_recharge(self, user_id: int, amount: float) -> Dict[str, Any]:
         """Создание пополнения баланса"""
         try:
+            
             # Валидация суммы
             if not await self._validate_recharge_amount(amount):
                 return {
@@ -808,6 +903,11 @@ class StarPurchaseService(StarPurchaseServiceInterface):
     async def _validate_recharge_amount(self, amount: float) -> bool:
         """Валидация суммы пополнения"""
         try:
+            
+            # Проверка на None
+            if amount is None:
+                return False
+
             if amount <= 0:
                 return False
 

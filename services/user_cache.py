@@ -4,6 +4,8 @@ User Cache Service - специализированный сервис для к
 import json
 import logging
 import time
+import traceback
+import asyncio
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 import redis.asyncio as redis
@@ -87,6 +89,42 @@ class UserCache:
 
         self.logger.info(f"UserCache initialized with redis_client: {redis_client is not None}, local_cache: {self.local_cache_enabled}")
 
+    async def _execute_redis_operation(self, operation: str, *args, **kwargs) -> Any:
+        """
+        Универсальный метод для выполнения Redis операций с поддержкой
+        как синхронных, так и асинхронных клиентов
+        
+        Args:
+            operation: Название операции (get, set, setex, delete, exists и т.д.)
+            *args: Аргументы операции
+            **kwargs: Именованные аргументы операции
+            
+        Returns:
+            Результат операции
+        """
+        try:
+            # Проверяем доступность Redis клиента
+            if not self.redis_client:
+                raise ConnectionError("Redis client is not available")
+            
+            # Получаем метод Redis клиента
+            method = getattr(self.redis_client, operation)
+            
+            # Проверяем, является ли метод асинхронным
+            if asyncio.iscoroutinefunction(method):
+                # Используем async метод
+                return await method(*args, **kwargs)
+            else:
+                # Для синхронного метода используем asyncio.to_thread
+                def wrapped_method():
+                    return method(*args, **kwargs)
+                
+                return await asyncio.to_thread(wrapped_method)
+                
+        except Exception as e:
+            self.logger.error(f"Error executing Redis operation {operation}: {e}")
+            raise
+
     async def cache_user_profile(self, user_id: int, user_data: Dict[str, Any]) -> bool:
         """Кеширование профиля пользователя с graceful degradation"""
         try:
@@ -98,7 +136,7 @@ class UserCache:
             if self.redis_client:
                 try:
                     serialized = json.dumps(user_data, default=str)
-                    await self.redis_client.setex(key, self.PROFILE_TTL, serialized)
+                    await self._execute_redis_operation('setex', key, self.PROFILE_TTL, serialized)
                     self.logger.debug(f"User profile {user_id} cached in Redis")
                     return True
                 except Exception as redis_error:
@@ -131,26 +169,56 @@ class UserCache:
             # Если Redis доступен, пробуем Redis
             if self.redis_client:
                 try:
-                    cached_data = await self.redis_client.get(key)
+                    self.logger.debug(f"Attempting to get profile from Redis for user {user_id}")
+                    cached_data = await self._execute_redis_operation('get', key)
                     if cached_data:
-                        data = json.loads(cached_data)
-                        # Проверяем свежесть данных
-                        cached_at = datetime.fromisoformat(data.get('cached_at', ''))
-                        if datetime.utcnow() - cached_at < timedelta(seconds=self.PROFILE_TTL):
-                            # Удаляем временные поля перед возвратом
-                            data.pop('cached_at', None)
-                            # Кэшируем в локальном хранилище
-                            if self.local_cache:
-                                self.local_cache.set(key, data)
-                            return data
-                        else:
-                            # Данные устарели, удаляем из кеша
-                            await self.redis_client.delete(key)
-                except Exception as e:
-                    self.logger.warning(f"Failed to get user profile from Redis, using local cache: {e}")
+                        self.logger.debug(f"Redis returned data for user {user_id}: {cached_data[:100]}...")
+                        try:
+                            data = json.loads(cached_data)
+                            # Проверяем свежесть данных
+                            cached_at_str = data.get('cached_at', '')
+                            if cached_at_str:
+                                try:
+                                    cached_at = datetime.fromisoformat(cached_at_str)
+                                    if datetime.utcnow() - cached_at < timedelta(seconds=self.PROFILE_TTL):
+                                        # Удаляем временные поля перед возвратом
+                                        data.pop('cached_at', None)
+                                        # Кэшируем в локальном хранилище
+                                        if self.local_cache:
+                                            self.local_cache.set(key, data)
+                                        self.logger.info(f"User profile {user_id} found in Redis (fresh)")
+                                        return data
+                                    else:
+                                        self.logger.warning(f"User profile {user_id} found in Redis but expired")
+                                        # Данные устарели, удаляем из кеша
+                                        await self._execute_redis_operation('delete', key)
+                                except ValueError as datetime_error:
+                                    self.logger.error(f"Error parsing cached_at for user {user_id}: {datetime_error}")
+                                    await self._execute_redis_operation('delete', key)
+                            else:
+                                self.logger.warning(f"No cached_at field in Redis data for user {user_id}")
+                                await self._execute_redis_operation('delete', key)
+                        except json.JSONDecodeError as json_error:
+                            self.logger.error(f"Error parsing JSON from Redis for user {user_id}: {json_error}")
+                            await self._execute_redis_operation('delete', key)
+                    else:
+                        self.logger.debug(f"No profile found in Redis for user {user_id}")
+                except Exception as redis_error:
+                    self.logger.error(f"Failed to get user profile from Redis: {redis_error}")
+                    self.logger.error(f"Redis error type: {type(redis_error).__name__}")
+                    self.logger.error(f"Redis error traceback: {traceback.format_exc()}")
                     # При ошибке Redis пробуем локальный кэш еще раз
                     if self.local_cache:
-                        return self.local_cache.get(key)
+                        self.logger.debug(f"Retrying local cache after Redis error for user {user_id}")
+                        try:
+                            local_data = self.local_cache.get(key)
+                            if local_data:
+                                self.logger.info(f"User profile {user_id} found in local cache (fallback)")
+                                return local_data
+                            else:
+                                self.logger.debug(f"No profile found in local cache fallback for user {user_id}")
+                        except Exception as fallback_error:
+                            self.logger.error(f"Error in local cache fallback for user {user_id}: {fallback_error}")
 
             return None
 
@@ -166,69 +234,133 @@ class UserCache:
                 'balance': balance,
                 'cached_at': datetime.utcnow().isoformat()
             }
+            
+            self.logger.debug(f"Attempting to cache user balance for user_id: {user_id}, balance: {balance}")
+            self.logger.debug(f"Redis client available: {self.redis_client is not None}")
+            self.logger.debug(f"Local cache available: {self.local_cache is not None}")
 
             # Пытаемся сохранить в Redis
             if self.redis_client:
                 try:
                     serialized = json.dumps(balance_data, default=str)
-                    await self.redis_client.setex(key, self.BALANCE_TTL, serialized)
-                    self.logger.debug(f"User balance {user_id} cached in Redis")
+                    self.logger.debug(f"Calling Redis setex for key: {key}, TTL: {self.BALANCE_TTL}")
+                    await self._execute_redis_operation('setex', key, self.BALANCE_TTL, serialized)
+                    self.logger.info(f"User balance {user_id} successfully cached in Redis")
                     return True
                 except Exception as redis_error:
-                    self.logger.warning(f"Failed to cache user balance in Redis, using local cache: {redis_error}")
+                    self.logger.error(f"Redis cache failed for user {user_id}: {redis_error}")
+                    self.logger.error(f"Redis error type: {type(redis_error).__name__}")
+                    self.logger.error(f"Redis error traceback: {traceback.format_exc()}")
+                    self.logger.warning(f"Falling back to local cache for user balance {user_id}")
 
             # Локальное кэширование
             if self.local_cache:
-                self.local_cache.set(key, balance_data)
-                self.logger.debug(f"User balance {user_id} cached in local cache")
-                return True
+                try:
+                    self.local_cache.set(key, balance_data)
+                    self.logger.info(f"User balance {user_id} successfully cached in local cache")
+                    return True
+                except Exception as local_cache_error:
+                    self.logger.error(f"Local cache failed for user {user_id}: {local_cache_error}")
+                    self.logger.error(f"Local cache error type: {type(local_cache_error).__name__}")
+                    self.logger.error(f"Local cache error traceback: {traceback.format_exc()}")
 
+            self.logger.error(f"Failed to cache user balance {user_id} in both Redis and local cache")
             return False
 
         except Exception as e:
-            self.logger.error(f"Error caching user balance {user_id}: {e}")
+            self.logger.error(f"Unexpected error caching user balance {user_id}: {e}")
+            self.logger.error(f"Error type: {type(e).__name__}")
+            self.logger.error(f"Error traceback: {traceback.format_exc()}")
             return False
 
     async def get_user_balance(self, user_id: int) -> Optional[int]:
         """Получение баланса пользователя из кеша с graceful degradation"""
         try:
             key = f"{self.CACHE_PREFIX}{user_id}:balance"
+            self.logger.debug(f"Attempting to get user balance for user_id: {user_id}")
+            self.logger.debug(f"Redis client available: {self.redis_client is not None}")
+            self.logger.debug(f"Local cache available: {self.local_cache is not None}")
 
             # Сначала пробуем локальный кэш
             if self.local_cache:
-                local_data = self.local_cache.get(key)
-                if local_data:
-                    self.logger.debug(f"User balance {user_id} found in local cache")
-                    return local_data.get('balance')
+                try:
+                    local_data = self.local_cache.get(key)
+                    if local_data:
+                        balance = local_data.get('data', {}).get('balance')
+                        self.logger.info(f"User balance {user_id} found in local cache: {balance}")
+                        return balance
+                    else:
+                        self.logger.debug(f"No balance found in local cache for user {user_id}")
+                except Exception as local_error:
+                    self.logger.error(f"Error reading from local cache for user {user_id}: {local_error}")
 
             # Если Redis доступен, пробуем Redis
-            if self.redis_client:
+            if self.redis_client and not isinstance(self.redis_client, bool):
                 try:
-                    cached_data = await self.redis_client.get(key)
+                    self.logger.debug(f"Attempting to get balance from Redis for user {user_id}")
+                    # Проверяем, что redis_client является асинхронным клиентом
+                    # Используем универсальный метод для выполнения Redis операций
+                    try:
+                        cached_data = await self._execute_redis_operation('get', key)
+                    except Exception as e:
+                        self.logger.error(f"Redis client error: {e}")
+                        cached_data = None
                     if cached_data:
-                        data = json.loads(cached_data)
-                        # Проверяем свежесть данных
-                        cached_at = datetime.fromisoformat(data.get('cached_at', ''))
-                        if datetime.utcnow() - cached_at < timedelta(seconds=self.BALANCE_TTL):
-                            balance = data['balance']
-                            # Кэшируем в локальном хранилище
-                            if self.local_cache:
-                                self.local_cache.set(key, data)
-                            return balance
-                        else:
-                            # Данные устарели, удаляем из кеша
-                            await self.redis_client.delete(key)
-                except Exception as e:
-                    self.logger.warning(f"Failed to get user balance from Redis, using local cache: {e}")
+                        self.logger.debug(f"Redis returned data for user {user_id}: {cached_data[:100]}...")
+                        try:
+                            data = json.loads(cached_data)
+                            # Проверяем свежесть данных
+                            cached_at_str = data.get('cached_at', '')
+                            if cached_at_str:
+                                try:
+                                    cached_at = datetime.fromisoformat(cached_at_str)
+                                    if datetime.utcnow() - cached_at < timedelta(seconds=self.BALANCE_TTL):
+                                        balance = data['balance']
+                                        self.logger.info(f"User balance {user_id} found in Redis (fresh): {balance}")
+                                        # Кэшируем в локальном хранилище
+                                        if self.local_cache:
+                                            self.local_cache.set(key, data)
+                                        return balance
+                                    else:
+                                        self.logger.warning(f"User balance {user_id} found in Redis but expired")
+                                        # Данные устарели, удаляем из кеша
+                                        await self._execute_redis_operation('delete', key)
+                                except ValueError as datetime_error:
+                                    self.logger.error(f"Error parsing cached_at for user {user_id}: {datetime_error}")
+                                    await self._execute_redis_operation('delete', key)
+                            else:
+                                self.logger.warning(f"No cached_at field in Redis data for user {user_id}")
+                                await self._execute_redis_operation('delete', key)
+                        except json.JSONDecodeError as json_error:
+                            self.logger.error(f"Error parsing JSON from Redis for user {user_id}: {json_error}")
+                            await self._execute_redis_operation('delete', key)
+                    else:
+                        self.logger.debug(f"No balance found in Redis for user {user_id}")
+                except Exception as redis_error:
+                    self.logger.error(f"Failed to get user balance from Redis: {redis_error}")
+                    self.logger.error(f"Redis error type: {type(redis_error).__name__}")
+                    self.logger.error(f"Redis error traceback: {traceback.format_exc()}")
                     # При ошибке Redis пробуем локальный кэш еще раз
                     if self.local_cache:
-                        local_data = self.local_cache.get(key)
-                        return local_data.get('balance') if local_data else None
+                        self.logger.debug(f"Retrying local cache after Redis error for user {user_id}")
+                        try:
+                            local_data = self.local_cache.get(key)
+                            balance = local_data.get('data', {}).get('balance') if local_data else None
+                            if balance is not None:
+                                self.logger.info(f"User balance {user_id} found in local cache (fallback): {balance}")
+                                return balance
+                            else:
+                                self.logger.debug(f"No balance found in local cache fallback for user {user_id}")
+                        except Exception as fallback_error:
+                            self.logger.error(f"Error in local cache fallback for user {user_id}: {fallback_error}")
 
+            self.logger.debug(f"No balance found for user {user_id} in any cache")
             return None
 
         except Exception as e:
-            self.logger.error(f"Error getting user balance {user_id}: {e}")
+            self.logger.error(f"Unexpected error getting user balance {user_id}: {e}")
+            self.logger.error(f"Error type: {type(e).__name__}")
+            self.logger.error(f"Error traceback: {traceback.format_exc()}")
             return None
 
     async def update_user_balance(self, user_id: int, new_balance: int) -> bool:
@@ -240,10 +372,39 @@ class UserCache:
                 'cached_at': datetime.utcnow().isoformat()
             }
             serialized = json.dumps(balance_data, default=str)
-            await self.redis_client.setex(key, self.BALANCE_TTL, serialized)
-            return True
+            
+            self.logger.debug(f"Attempting to update user balance for user_id: {user_id}, new_balance: {new_balance}")
+            self.logger.debug(f"Redis client available: {self.redis_client is not None}")
+            
+            if self.redis_client and not isinstance(self.redis_client, bool):
+                try:
+                    # Проверяем, что redis_client является асинхронным клиентом
+                    await self._execute_redis_operation('setex', key, self.BALANCE_TTL, serialized)
+                    self.logger.info(f"User balance {user_id} successfully updated in Redis")
+                    return True
+                except Exception as redis_error:
+                    self.logger.error(f"Failed to update user balance in Redis: {redis_error}")
+                    self.logger.error(f"Redis error type: {type(redis_error).__name__}")
+                    self.logger.error(f"Redis error traceback: {traceback.format_exc()}")
+                    self.logger.warning(f"Falling back to local cache for user balance update {user_id}")
+                
+            # Fallback to local cache if Redis fails or is not available
+            if self.local_cache:
+                try:
+                    self.local_cache.set(key, balance_data)
+                    self.logger.info(f"User balance {user_id} updated in local cache (fallback)")
+                    return True
+                except Exception as local_error:
+                    self.logger.error(f"Failed to update user balance in local cache: {local_error}")
+                    self.logger.error(f"Local cache error type: {type(local_error).__name__}")
+                    self.logger.error(f"Local cache error traceback: {traceback.format_exc()}")
+            
+            self.logger.error(f"Failed to update user balance {user_id} in both Redis and local cache")
+            return False
         except Exception as e:
-            self.logger.error(f"Error updating user balance {user_id}: {e}")
+            self.logger.error(f"Unexpected error updating user balance {user_id}: {e}")
+            self.logger.error(f"Error type: {type(e).__name__}")
+            self.logger.error(f"Error traceback: {traceback.format_exc()}")
             return False
 
     async def cache_user_activity(self, user_id: int, activity_data: Dict[str, Any]) -> bool:
@@ -256,18 +417,27 @@ class UserCache:
             if self.redis_client:
                 try:
                     serialized = json.dumps(activity_data, default=str)
-                    await self.redis_client.setex(key, self.ACTIVITY_TTL, serialized)
+                    await self._execute_redis_operation('setex', key, self.ACTIVITY_TTL, serialized)
                     self.logger.debug(f"User activity {user_id} cached in Redis")
                     return True
                 except Exception as redis_error:
-                    self.logger.warning(f"Failed to cache user activity in Redis, using local cache: {redis_error}")
+                    self.logger.error(f"Redis cache failed for user {user_id}: {redis_error}")
+                    self.logger.error(f"Redis error type: {type(redis_error).__name__}")
+                    self.logger.error(f"Redis error traceback: {traceback.format_exc()}")
+                    self.logger.warning(f"Falling back to local cache for user activity {user_id}")
 
             # Локальное кэширование
             if self.local_cache:
-                self.local_cache.set(key, activity_data)
-                self.logger.debug(f"User activity {user_id} cached in local cache")
-                return True
+                try:
+                    self.local_cache.set(key, activity_data)
+                    self.logger.debug(f"User activity {user_id} cached in local cache")
+                    return True
+                except Exception as local_cache_error:
+                    self.logger.error(f"Local cache failed for user {user_id}: {local_cache_error}")
+                    self.logger.error(f"Local cache error type: {type(local_cache_error).__name__}")
+                    self.logger.error(f"Local cache error traceback: {traceback.format_exc()}")
 
+            self.logger.error(f"Failed to cache user activity {user_id} in both Redis and local cache")
             return False
 
         except Exception as e:
@@ -289,26 +459,56 @@ class UserCache:
             # Если Redis доступен, пробуем Redis
             if self.redis_client:
                 try:
-                    cached_data = await self.redis_client.get(key)
+                    self.logger.debug(f"Attempting to get activity from Redis for user {user_id}")
+                    cached_data = await self._execute_redis_operation('get', key)
                     if cached_data:
-                        data = json.loads(cached_data)
-                        # Проверяем свежесть данных
-                        cached_at = datetime.fromisoformat(data.get('cached_at', ''))
-                        if datetime.utcnow() - cached_at < timedelta(seconds=self.ACTIVITY_TTL):
-                            # Удаляем временные поля перед возвратом
-                            data.pop('cached_at', None)
-                            # Кэшируем в локальном хранилище
-                            if self.local_cache:
-                                self.local_cache.set(key, data)
-                            return data
-                        else:
-                            # Данные устарели, удаляем из кеша
-                            await self.redis_client.delete(key)
-                except Exception as e:
-                    self.logger.warning(f"Failed to get user activity from Redis, using local cache: {e}")
+                        self.logger.debug(f"Redis returned data for user {user_id}: {cached_data[:100]}...")
+                        try:
+                            data = json.loads(cached_data)
+                            # Проверяем свежесть данных
+                            cached_at_str = data.get('cached_at', '')
+                            if cached_at_str:
+                                try:
+                                    cached_at = datetime.fromisoformat(cached_at_str)
+                                    if datetime.utcnow() - cached_at < timedelta(seconds=self.ACTIVITY_TTL):
+                                        # Удаляем временные поля перед возвратом
+                                        data.pop('cached_at', None)
+                                        # Кэшируем в локальном хранилище
+                                        if self.local_cache:
+                                            self.local_cache.set(key, data)
+                                        self.logger.info(f"User activity {user_id} found in Redis (fresh)")
+                                        return data
+                                    else:
+                                        self.logger.warning(f"User activity {user_id} found in Redis but expired")
+                                        # Данные устарели, удаляем из кеша
+                                        await self._execute_redis_operation('delete', key)
+                                except ValueError as datetime_error:
+                                    self.logger.error(f"Error parsing cached_at for user {user_id}: {datetime_error}")
+                                    await self._execute_redis_operation('delete', key)
+                            else:
+                                self.logger.warning(f"No cached_at field in Redis data for user {user_id}")
+                                await self._execute_redis_operation('delete', key)
+                        except json.JSONDecodeError as json_error:
+                            self.logger.error(f"Error parsing JSON from Redis for user {user_id}: {json_error}")
+                            await self._execute_redis_operation('delete', key)
+                    else:
+                        self.logger.debug(f"No activity found in Redis for user {user_id}")
+                except Exception as redis_error:
+                    self.logger.error(f"Failed to get user activity from Redis: {redis_error}")
+                    self.logger.error(f"Redis error type: {type(redis_error).__name__}")
+                    self.logger.error(f"Redis error traceback: {traceback.format_exc()}")
                     # При ошибке Redis пробуем локальный кэш еще раз
                     if self.local_cache:
-                        return self.local_cache.get(key)
+                        self.logger.debug(f"Retrying local cache after Redis error for user {user_id}")
+                        try:
+                            local_data = self.local_cache.get(key)
+                            if local_data:
+                                self.logger.info(f"User activity {user_id} found in local cache (fallback)")
+                                return local_data
+                            else:
+                                self.logger.debug(f"No activity found in local cache fallback for user {user_id}")
+                        except Exception as fallback_error:
+                            self.logger.error(f"Error in local cache fallback for user {user_id}: {fallback_error}")
 
             return None
 
@@ -319,41 +519,145 @@ class UserCache:
     async def invalidate_user_cache(self, user_id: int) -> bool:
         """Инвалидация всего кеша пользователя"""
         try:
-            # Удаляем все связанные с пользователем ключи
-            pattern = f"{self.CACHE_PREFIX}{user_id}:*"
-            keys = await self.redis_client.keys(pattern)
-            if keys:
-                await self.redis_client.delete(*keys)
-            return True
+            self.logger.debug(f"Attempting to invalidate cache for user_id: {user_id}")
+            self.logger.debug(f"Redis client available: {self.redis_client is not None}")
+            
+            success = True
+            
+            # Удаляем все связанные с пользователем ключи из Redis
+            if self.redis_client:
+                try:
+                    pattern = f"{self.CACHE_PREFIX}{user_id}:*"
+                    self.logger.debug(f"Getting keys with pattern: {pattern}")
+                    keys = await self._execute_redis_operation('keys', pattern)
+                    if keys:
+                        self.logger.info(f"Found {len(keys)} keys to delete for user {user_id}")
+                        await self._execute_redis_operation('delete', *keys)
+                        self.logger.info(f"Successfully deleted {len(keys)} keys from Redis for user {user_id}")
+                    else:
+                        self.logger.debug(f"No keys found for user {user_id} in Redis")
+                except Exception as redis_error:
+                    self.logger.error(f"Error invalidating Redis cache for user {user_id}: {redis_error}")
+                    self.logger.error(f"Redis error type: {type(redis_error).__name__}")
+                    self.logger.error(f"Redis error traceback: {traceback.format_exc()}")
+                    success = False
+            else:
+                self.logger.warning(f"Redis client not available for invalidating user cache {user_id}")
+            
+            # Удаляем из локального кэша
+            if self.local_cache:
+                try:
+                    keys_to_remove = []
+                    for key in self.local_cache.cache.keys():
+                        if key.startswith(f"{self.CACHE_PREFIX}{user_id}:"):
+                            keys_to_remove.append(key)
+                    
+                    if keys_to_remove:
+                        for key in keys_to_remove:
+                            self.local_cache._remove_key(key)
+                        self.logger.info(f"Successfully removed {len(keys_to_remove)} keys from local cache for user {user_id}")
+                    else:
+                        self.logger.debug(f"No keys found for user {user_id} in local cache")
+                except Exception as local_error:
+                    self.logger.error(f"Error invalidating local cache for user {user_id}: {local_error}")
+                    self.logger.error(f"Local cache error type: {type(local_error).__name__}")
+                    self.logger.error(f"Local cache error traceback: {traceback.format_exc()}")
+                    success = False
+            
+            if success:
+                self.logger.info(f"Successfully invalidated cache for user {user_id}")
+            else:
+                self.logger.warning(f"Partially invalidated cache for user {user_id} (some errors occurred)")
+                
+            return success
         except Exception as e:
-            self.logger.error(f"Error invalidating user cache {user_id}: {e}")
+            self.logger.error(f"Unexpected error invalidating user cache {user_id}: {e}")
+            self.logger.error(f"Error type: {type(e).__name__}")
+            self.logger.error(f"Error traceback: {traceback.format_exc()}")
             return False
 
     async def is_user_cached(self, user_id: int) -> bool:
         """Проверка, есть ли пользователь в кеше"""
         try:
             key = f"{self.CACHE_PREFIX}{user_id}:profile"
-            return await self.redis_client.exists(key) > 0
+            self.logger.debug(f"Checking if user {user_id} is cached, key: {key}")
+            self.logger.debug(f"Redis client available: {self.redis_client is not None}")
+            
+            if self.redis_client:
+                try:
+                    exists = await self._execute_redis_operation('exists', key) > 0
+                    self.logger.debug(f"Redis exists result for user {user_id}: {exists}")
+                    return exists
+                except Exception as redis_error:
+                    self.logger.error(f"Error checking Redis cache for user {user_id}: {redis_error}")
+                    self.logger.error(f"Redis error type: {type(redis_error).__name__}")
+                    self.logger.error(f"Redis error traceback: {traceback.format_exc()}")
+            else:
+                self.logger.warning(f"Redis client not available for checking user cache {user_id}")
+            
+            # Fallback to local cache
+            if self.local_cache:
+                try:
+                    local_exists = self.local_cache.get(key) is not None
+                    self.logger.debug(f"Local cache exists result for user {user_id}: {local_exists}")
+                    return local_exists
+                except Exception as local_error:
+                    self.logger.error(f"Error checking local cache for user {user_id}: {local_error}")
+                    self.logger.error(f"Local cache error type: {type(local_error).__name__}")
+                    self.logger.error(f"Local cache error traceback: {traceback.format_exc()}")
+            
+            return False
         except Exception as e:
-            self.logger.error(f"Error checking if user {user_id} is cached: {e}")
+            self.logger.error(f"Unexpected error checking if user {user_id} is cached: {e}")
+            self.logger.error(f"Error type: {type(e).__name__}")
+            self.logger.error(f"Error traceback: {traceback.format_exc()}")
             return False
 
     async def get_cache_stats(self, user_id: int) -> Dict[str, Any]:
         """Получение статистики кеша для пользователя"""
         try:
+            self.logger.debug(f"Getting cache stats for user_id: {user_id}")
+            self.logger.debug(f"Redis client available: {self.redis_client is not None}")
+            
             stats = {}
             for cache_type in ['profile', 'balance', 'activity']:
                 key = f"{self.CACHE_PREFIX}{user_id}:{cache_type}"
-                exists = await self.redis_client.exists(key)
-                if exists:
-                    ttl = await self.redis_client.ttl(key)
-                    stats[cache_type] = {
-                        'exists': True,
-                        'ttl': ttl if ttl > 0 else -1
-                    }
-                else:
-                    stats[cache_type] = {'exists': False, 'ttl': 0}
+                stats[cache_type] = {'exists': False, 'ttl': 0}
+                
+                try:
+                    if self.redis_client:
+                        exists = await self._execute_redis_operation('exists', key)
+                        if exists:
+                            ttl = await self._execute_redis_operation('ttl', key)
+                            stats[cache_type] = {
+                                'exists': True,
+                                'ttl': ttl if ttl > 0 else -1
+                            }
+                            self.logger.debug(f"Redis stats for {cache_type} - exists: {stats[cache_type]['exists']}, ttl: {stats[cache_type]['ttl']}")
+                        else:
+                            self.logger.debug(f"Redis stats for {cache_type} - not exists")
+                    else:
+                        self.logger.warning(f"Redis client not available for cache stats {cache_type}")
+                    
+                    # Check local cache as well
+                    if self.local_cache:
+                        local_exists = self.local_cache.get(key) is not None
+                        if local_exists:
+                            stats[cache_type]['local_cache'] = True
+                            self.logger.debug(f"Local cache stats for {cache_type} - exists: True")
+                        else:
+                            stats[cache_type]['local_cache'] = False
+                            self.logger.debug(f"Local cache stats for {cache_type} - not exists")
+                            
+                except Exception as cache_error:
+                    self.logger.error(f"Error getting stats for {cache_type} cache: {cache_error}")
+                    self.logger.error(f"Cache error type: {type(cache_error).__name__}")
+                    self.logger.error(f"Cache error traceback: {traceback.format_exc()}")
+            
+            self.logger.info(f"Cache stats for user {user_id}: {stats}")
             return stats
         except Exception as e:
-            self.logger.error(f"Error getting cache stats for user {user_id}: {e}")
+            self.logger.error(f"Unexpected error getting cache stats for user {user_id}: {e}")
+            self.logger.error(f"Error type: {type(e).__name__}")
+            self.logger.error(f"Error traceback: {traceback.format_exc()}")
             return {}

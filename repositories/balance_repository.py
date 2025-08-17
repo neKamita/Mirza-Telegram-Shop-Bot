@@ -119,7 +119,7 @@ class BalanceRepository:
                     currency=currency,
                     description=description,
                     external_id=external_id,
-                    metadata=metadata_json
+                    transaction_metadata=metadata_json
                 )
                 result = await session.execute(stmt)
                 await session.commit()
@@ -164,11 +164,18 @@ class BalanceRepository:
                     }
 
                     # Парсим метаданные
-                    if transaction.metadata:
+                    if transaction.transaction_metadata:
                         try:
-                            transaction_data["metadata"] = json.loads(transaction.metadata)
-                        except json.JSONDecodeError:
-                            transaction_data["metadata"] = transaction.metadata
+                            transaction_data["metadata"] = json.loads(transaction.transaction_metadata)
+                            # Убираем избыточное логирование - логируем только ошибки
+                        except json.JSONDecodeError as e:
+                            self.logger.warning(f"Failed to parse metadata for transaction {transaction.id}: {e}")
+                            transaction_data["metadata"] = transaction.transaction_metadata
+                        except Exception as e:
+                            self.logger.error(f"Unexpected error parsing metadata for transaction {transaction.id}: {e}")
+                            transaction_data["metadata"] = transaction.transaction_metadata
+                    else:
+                        transaction_data["metadata"] = None
 
                     transactions_data.append(transaction_data)
 
@@ -200,11 +207,18 @@ class BalanceRepository:
                     }
 
                     # Парсим метаданные
-                    if transaction.metadata:
+                    if transaction.transaction_metadata:
                         try:
-                            transaction_data["metadata"] = json.loads(transaction.metadata)
-                        except json.JSONDecodeError:
-                            transaction_data["metadata"] = transaction.metadata
+                            transaction_data["metadata"] = json.loads(transaction.transaction_metadata)
+                            # Убираем избыточное логирование
+                        except json.JSONDecodeError as e:
+                            self.logger.warning(f"Failed to parse metadata for transaction {transaction.id} by external_id: {e}")
+                            transaction_data["metadata"] = transaction.transaction_metadata
+                        except Exception as e:
+                            self.logger.error(f"Unexpected error parsing metadata for transaction {transaction.id} by external_id: {e}")
+                            transaction_data["metadata"] = transaction.transaction_metadata
+                    else:
+                        transaction_data["metadata"] = None
 
                     return transaction_data
 
@@ -232,7 +246,7 @@ class BalanceRepository:
                 )
 
                 if metadata:
-                    update_stmt = update_stmt.values(metadata=json.dumps(metadata))
+                    update_stmt = update_stmt.values(transaction_metadata=json.dumps(metadata))
 
                 await session.execute(update_stmt)
                 await session.commit()
@@ -339,11 +353,18 @@ class BalanceRepository:
                     }
 
                     # Парсим метаданные
-                    if transaction.metadata:
+                    if transaction.transaction_metadata:
                         try:
-                            transaction_data["metadata"] = json.loads(transaction.metadata)
-                        except json.JSONDecodeError:
-                            transaction_data["metadata"] = transaction.metadata
+                            transaction_data["metadata"] = json.loads(transaction.transaction_metadata)
+                            # Убираем избыточное логирование
+                        except json.JSONDecodeError as e:
+                            self.logger.warning(f"Failed to parse metadata for pending transaction {transaction.id}: {e}")
+                            transaction_data["metadata"] = transaction.transaction_metadata
+                        except Exception as e:
+                            self.logger.error(f"Unexpected error parsing metadata for pending transaction {transaction.id}: {e}")
+                            transaction_data["metadata"] = transaction.transaction_metadata
+                    else:
+                        transaction_data["metadata"] = None
 
                     transactions_data.append(transaction_data)
 

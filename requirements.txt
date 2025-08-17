@@ -1,5 +1,5 @@
 # Telegram Bot Framework
-aiogram>=3.15.0
+aiogram>=3.21.0
 
 # Database
 asyncpg>=0.29.0

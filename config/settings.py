@@ -120,10 +120,33 @@ class Settings:
         self.cache_ttl_payment_status: int = int(os.getenv("CACHE_TTL_PAYMENT_STATUS", "900"))
         self.cache_ttl_rate_limit: int = int(os.getenv("CACHE_TTL_RATE_LIMIT", "60"))
 
-        # Rate Limiting Configuration
+        # Rate Limiting Configuration - Optimized for 1000+ users
         self.rate_limit_api: int = int(os.getenv("RATE_LIMIT_API", "10"))
         self.rate_limit_payment: int = int(os.getenv("RATE_LIMIT_PAYMENT", "2"))
         self.rate_limit_websocket: int = int(os.getenv("RATE_LIMIT_WEBSOCKET", "5"))
+        
+        # Per-user Rate Limits (более мягкие для лучшего UX)
+        self.rate_limit_user_messages: int = int(os.getenv("RATE_LIMIT_USER_MESSAGES", "30"))  # 30 сообщений/мин
+        self.rate_limit_user_operations: int = int(os.getenv("RATE_LIMIT_USER_OPERATIONS", "20"))  # 20 операций/мин
+        self.rate_limit_user_payments: int = int(os.getenv("RATE_LIMIT_USER_PAYMENTS", "5"))  # 5 платежей/мин
+        
+        # Global Rate Limits (защита от DDoS)
+        self.rate_limit_global_messages: int = int(os.getenv("RATE_LIMIT_GLOBAL_MESSAGES", "1000"))  # 1000 сообщений/мин глобально
+        self.rate_limit_global_operations: int = int(os.getenv("RATE_LIMIT_GLOBAL_OPERATIONS", "500"))  # 500 операций/мин глобально
+        self.rate_limit_global_payments: int = int(os.getenv("RATE_LIMIT_GLOBAL_PAYMENTS", "100"))  # 100 платежей/мин глобально
+        
+        # Burst Limits (кратковременные всплески)
+        self.rate_limit_burst_messages: int = int(os.getenv("RATE_LIMIT_BURST_MESSAGES", "10"))  # 10 сообщений за 10 сек
+        self.rate_limit_burst_operations: int = int(os.getenv("RATE_LIMIT_BURST_OPERATIONS", "5"))  # 5 операций за 10 сек
+        self.rate_limit_burst_window: int = int(os.getenv("RATE_LIMIT_BURST_WINDOW", "10"))  # окно burst в секундах
+        
+        # Premium User Multipliers
+        self.rate_limit_premium_multiplier: float = float(os.getenv("RATE_LIMIT_PREMIUM_MULTIPLIER", "2.0"))  # x2 лимиты для премиум
+        
+        # New User Restrictions (первые 24 часа)
+        self.rate_limit_new_user_messages: int = int(os.getenv("RATE_LIMIT_NEW_USER_MESSAGES", "15"))  # 15 сообщений/мин для новых
+        self.rate_limit_new_user_operations: int = int(os.getenv("RATE_LIMIT_NEW_USER_OPERATIONS", "10"))  # 10 операций/мин для новых
+        self.rate_limit_new_user_hours: int = int(os.getenv("RATE_LIMIT_NEW_USER_HOURS", "24"))  # 24 часа ограничений
 
         # Nginx/Proxy
         self.proxy_url: str = os.getenv("PROXY_URL", "")

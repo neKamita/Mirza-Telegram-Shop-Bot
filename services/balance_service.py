@@ -271,13 +271,23 @@ class BalanceService(BalanceServiceInterface):
             else:
                 initial_balance = 0
 
-            # Вычисляем финальный баланс
-            final_balance = initial_balance
+            # Получаем реальный текущий баланс из базы данных
+            current_balance_data = await self.get_user_balance(user_id)
+            final_balance = current_balance_data.get("balance", 0) if current_balance_data else 0
+            
+            # Вычисляем начальный баланс на основе текущего и транзакций
+            # Начальный баланс = текущий баланс - сумма всех завершенных транзакций за период
+            balance_change = 0
             for transaction in filtered_transactions:
-                if transaction["transaction_type"] == "purchase":
-                    final_balance -= transaction["amount"]
-                elif transaction["transaction_type"] in ["refund", "bonus", "recharge"]:
-                    final_balance += transaction["amount"]
+                # Учитываем только завершенные транзакции для расчета изменения баланса
+                if transaction.get("status") == "completed":
+                    if transaction["transaction_type"] == "purchase":
+                        balance_change -= transaction["amount"]
+                    elif transaction["transaction_type"] in ["refund", "bonus", "recharge"]:
+                        balance_change += transaction["amount"]
+            
+            # Начальный баланс = текущий баланс - изменения за период
+            initial_balance = final_balance - balance_change
 
             return {
                 "user_id": user_id,
@@ -307,7 +317,7 @@ class BalanceService(BalanceServiceInterface):
                     user_id=user_id,
                     transaction_type="recharge",
                     amount=amount,
-                    description="Пополнение баланса через Heleket",
+                    description="Пополнение баланса",
                     external_id=payment_uuid,
                     metadata={
                         "payment_uuid": payment_uuid,
@@ -325,13 +335,19 @@ class BalanceService(BalanceServiceInterface):
             # Обновляем баланс
             success = await self.update_user_balance(user_id, amount, "add")
             if success:
+                # Принудительно инвалидируем кэш пользователя, чтобы гарантировать свежесть данных
+                if self.user_cache:
+                    await self.user_cache.invalidate_user_cache(user_id)
+                    self.logger.info(f"Invalidated user cache for {user_id} after recharge")
+                
                 # Завершаем транзакцию
                 await self.complete_transaction(
                     transaction_id,
                     metadata={
                         "completed_at": datetime.utcnow().isoformat(),
                         "payment_uuid": payment_uuid,
-                        "balance_updated": True
+                        "balance_updated": True,
+                        "cache_invalidated": True
                     }
                 )
                 self.logger.info(f"Successfully processed recharge {payment_uuid} for user {user_id}")

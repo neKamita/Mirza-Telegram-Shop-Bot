@@ -14,7 +14,10 @@ from services.payment_cache import PaymentCache
 
 
 class PaymentService(PaymentInterface):
-    """Сервис для управления платежами с кешированием"""
+    """
+    Сервис для управления платежами с кешированием
+    Интеграция с Heleket API для обработки платежей в TON
+    """
 
     def __init__(self, merchant_uuid: str, api_key: str, payment_cache: Optional[PaymentCache] = None):
         self.merchant_uuid = merchant_uuid

@@ -173,3 +173,5 @@ nginx/ssl/
 /ssl
 INSTRUCTIONS.md
 REDIS_PORTS_CHANGE_INSTRUCTIONS.md
+.kilocode/rules/byterover-rules.md
+.agent.md
