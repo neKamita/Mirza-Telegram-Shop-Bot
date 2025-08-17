@@ -116,10 +116,6 @@ flowchart TD
     P --> Q[📦 Очистка кеша]
     Q --> R[📤 Уведомление пользователя]
     
-    style A fill:#e1f5fe
-    style R fill:#e8f5e8
-    style H fill:#ffebee
-    style N fill:#ffebee
 ```
 
 ## 🏛️ Слои архитектуры
@@ -190,20 +186,6 @@ graph TB
     NG --> WEB
     NG --> API
     
-    %% Styling
-    classDef presentation fill:#e3f2fd,stroke:#1976d2
-    classDef handler fill:#f3e5f5,stroke:#7b1fa2
-    classDef service fill:#e8f5e8,stroke:#388e3c
-    classDef repository fill:#fff3e0,stroke:#f57c00
-    classDef data fill:#fce4ec,stroke:#c2185b
-    classDef infrastructure fill:#f1f8e9,stroke:#689f38
-    
-    class TG,WEB,API presentation
-    class MH,PH,BH,EH handler
-    class PS,BS,CS,RL,HS service
-    class UR,BR,TR repository
-    class PG,RD data
-    class NG,DC,PR infrastructure
 ```
 
 ## 🔄 Паттерны проектирования
@@ -299,10 +281,6 @@ graph TB
     RC2 -.-> RR2
     RC3 -.-> RR3
     
-    style LB fill:#e1f5fe
-    style PG_MASTER fill:#e8f5e8
-    style PG_SLAVE1 fill:#f3e5f5
-    style PG_SLAVE2 fill:#f3e5f5
 ```
 
 ## 🔐 Безопасность
@@ -344,13 +322,6 @@ graph TD
     LOG --> ALERT
     ALERT --> AUDIT
     
-    style SSL fill:#e8f5e8
-    style HMAC fill:#e8f5e8
-    style RATE fill:#fff3e0
-    style VALID fill:#fff3e0
-    style AUTH fill:#e1f5fe
-    style LOG fill:#fce4ec
-    style ALERT fill:#ffebee
 ```
 
 ## 📊 Мониторинг и метрики
@@ -404,9 +375,6 @@ graph TB
     ELK --> ALERT
     PERF --> ALERT
     
-    style PROM fill:#e8f5e8
-    style GRAF fill:#e1f5fe
-    style ALERT fill:#ffebee
 ```
 
 ---

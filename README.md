@@ -201,17 +201,6 @@ graph TD
     
     UR --> CFG
     BR --> CFG
-    
-    %% Styling
-    classDef handlerLayer fill:#e1f5fe,stroke:#0277bd,stroke-width:3px
-    classDef serviceLayer fill:#f3e5f5,stroke:#7b1fa2,stroke-width:3px
-    classDef repoLayer fill:#e8f5e8,stroke:#388e3c,stroke-width:3px
-    classDef coreLayer fill:#fff3e0,stroke:#f57c00,stroke-width:3px
-    
-    class MH,PH,PuH,BH handlerLayer
-    class PS,BS,SPS,RL serviceLayer
-    class UR,BR repoLayer
-    class INT,CFG coreLayer
 ```
 
 ## 📊 Структура базы данных
@@ -292,12 +281,12 @@ classDiagram
         +DATETIME updated_at
     }
     
-    USERS ||--|| BALANCES : "1:1 имеет баланс"
-    USERS ||--o{ TRANSACTIONS : "1:N совершает транзакции"
+    USERS ||--|| BALANCES : has_balance
+    USERS ||--o{ TRANSACTIONS : makes_transactions
     
-    note for USERS "🔑 Основная таблица пользователей\nТелеграм ID как первичный ключ"
-    note for BALANCES "💰 Баланс пользователя\nПоддержка различных валют"
-    note for TRANSACTIONS "📊 История всех операций\nВключая платежи и возвраты"
+    note for USERS "Primary users table with Telegram ID as PK"
+    note for BALANCES "User balance with multi-currency support"
+    note for TRANSACTIONS "Transaction history including payments and refunds"
 ```
 
 ### Описание таблиц
@@ -709,15 +698,6 @@ graph TD
     
     FIXTURES --> FIX_DB
     FIXTURES --> FIX_REDIS
-    
-    %% Styling
-    classDef folderStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    classDef fileStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    classDef testStyle fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
-    
-    class TESTS,UNIT,INTEGRATION,FIXTURES folderStyle
-    class UNIT_SERVICES,UNIT_REPOS,UNIT_HANDLERS,INT_PAYMENT,INT_WEBHOOK testStyle
-    class FIX_DB,FIX_REDIS fileStyle
 ```
 
 ## 🚀 Производительность

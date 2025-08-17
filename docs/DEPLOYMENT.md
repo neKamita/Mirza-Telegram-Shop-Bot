@@ -70,11 +70,6 @@ graph TB
     RM -.-> R2
     RM -.-> R3
     
-    style NGINX fill:#e1f5fe
-    style APP fill:#e8f5e8
-    style WEBHOOK fill:#f3e5f5
-    style PG fill:#fff3e0
-    style R1,R2,R3 fill:#ffebee
 ```
 
 ### Порты и сервисы
@@ -108,9 +103,6 @@ graph LR
     APP --> P7379
     WEBHOOK --> P7379
     
-    style P80,P443 fill:#e8f5e8
-    style P8001,P5432,P7379,P7380,P7381 fill:#f3e5f5
-    style P9090,P3000 fill:#fff3e0
 ```
 
 ## 🔄 CI/CD Pipeline
@@ -161,10 +153,6 @@ flowchart TD
     L --> Q[📧 Notification]
     P --> Q
     
-    style A fill:#e1f5fe
-    style Q fill:#e8f5e8
-    style E fill:#fff3e0
-    style N fill:#ffebee
 ```
 
 ## 🌍 Среды развертывания
@@ -221,9 +209,6 @@ graph TB
     PROD_APP2 --> PROD_REDIS
     PROD_APP3 --> PROD_REDIS
     
-    style DEV_APP fill:#e3f2fd
-    style STAGE_APP1,STAGE_APP2 fill:#f3e5f5
-    style PROD_APP1,PROD_APP2,PROD_APP3 fill:#e8f5e8
 ```
 
 ## 🔧 Конфигурация инфраструктуры
@@ -262,10 +247,6 @@ graph TD
     RDS --> SSM
     REDIS --> K8S_SEC
     
-    style TF fill:#e1f5fe
-    style VAULT fill:#e8f5e8
-    style SSM fill:#f3e5f5
-    style K8S_SEC fill:#fff3e0
 ```
 
 ## 🔄 Стратегии развертывания
@@ -323,9 +304,6 @@ graph TD
     H --> L
     K --> L
     
-    style A fill:#e1f5fe
-    style J fill:#e8f5e8
-    style L fill:#ffebee
 ```
 
 ## 📊 Мониторинг развертывания
@@ -369,9 +347,6 @@ graph TB
     MEM --> EMAIL
     ERR --> PAGER
     
-    style DT,SR fill:#e8f5e8
-    style RB,MTTR fill:#fff3e0
-    style PAGER fill:#ffebee
 ```
 
 ## 🔐 Безопасность развертывания
@@ -396,10 +371,6 @@ flowchart TD
     E -->|❌ Test Failures| K
     F -->|❌ Non-Compliant| K
     
-    style A fill:#e1f5fe
-    style G fill:#e8f5e8
-    style K fill:#ffebee
-    style J fill:#fff3e0
 ```
 
 ---
