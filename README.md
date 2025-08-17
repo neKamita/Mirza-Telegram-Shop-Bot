@@ -237,7 +237,7 @@ erDiagram
 ```mermaid
 classDiagram
     class USERS {
-        +INTEGER user_id PK
+        +INTEGER user_id
         +VARCHAR username
         +VARCHAR first_name
         +VARCHAR last_name
@@ -246,34 +246,30 @@ classDiagram
     }
     
     class BALANCES {
-        +INTEGER id PK
-        +INTEGER user_id FK
+        +INTEGER id
+        +INTEGER user_id
         +DECIMAL amount
-        +VARCHAR(3) currency
+        +VARCHAR currency
         +DATETIME created_at
         +DATETIME updated_at
     }
     
     class TRANSACTIONS {
-        +INTEGER id PK
-        +INTEGER user_id FK
+        +INTEGER id
+        +INTEGER user_id
         +ENUM transaction_type
         +ENUM status
         +DECIMAL amount
-        +VARCHAR(3) currency
+        +VARCHAR currency
         +VARCHAR description
-        +VARCHAR external_id UK
+        +VARCHAR external_id
         +TEXT transaction_metadata
         +DATETIME created_at
         +DATETIME updated_at
     }
     
-    USERS ||--|| BALANCES : has_balance
-    USERS ||--o{ TRANSACTIONS : makes_transactions
-    
-    note for USERS "Primary users table with Telegram ID as PK"
-    note for BALANCES "User balance with multi-currency support"
-    note for TRANSACTIONS "Transaction history including payments and refunds"
+    USERS ||--|| BALANCES
+    USERS ||--o{ TRANSACTIONS
 ```
 
 ### Описание таблиц
