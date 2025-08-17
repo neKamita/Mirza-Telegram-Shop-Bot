@@ -89,10 +89,6 @@ graph TB
     BR --> PG
     CACHE --> REDIS
 
-    style TG fill:#0088cc
-    style HELEKET fill:#ff6b6b
-    style PG fill:#336791
-    style REDIS fill:#dc382d
 ```
 
 ### Компонентная архитектура
@@ -144,15 +140,6 @@ flowchart LR
     BS --> CS
     SPS --> CS
 
-    classDef handlerStyle fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
-    classDef serviceStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    classDef repoStyle fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
-    classDef coreStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-
-    class MH,BH,EH,PH,PuH,BalH handlerStyle
-    class PS,BS,SPS,CS,RL,HS,WS serviceStyle
-    class UR,BR repoStyle
-    class INT,CFG coreStyle
 ```
 
 **Слоистая архитектура:**
@@ -445,10 +432,6 @@ graph TB
     R2 -.-> RR2
     R3 -.-> RR3
 
-    style APP fill:#e1f5fe
-    style WEBHOOK fill:#f3e5f5
-    style PG fill:#e8f5e8
-    style NGINX fill:#fff3e0
 ```
 
 ### Docker сервисы
@@ -578,9 +561,6 @@ graph LR
     GL --> OPS
     GL --> PAY
 
-    style UL fill:#e1f5fe
-    style GL fill:#f3e5f5
-    style BL fill:#e8f5e8
 ```
 
 ## 🔧 Конфигурация
