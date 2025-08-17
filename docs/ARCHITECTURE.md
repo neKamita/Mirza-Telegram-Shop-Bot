@@ -9,50 +9,77 @@
 ### Общая схема взаимодействия
 
 ```mermaid
-C4Context
-    title Контекстная диаграмма системы
-
-    Person(user, "Пользователь", "Пользователь Telegram")
-    System(bot, "Telegram Bot System", "Система обработки платежей и управления балансом")
+graph TB
+    subgraph "External Systems"
+        USER[👤 User]
+        TG[📱 Telegram API]
+        HELEKET[💳 Heleket Payment]
+        MON[📊 Monitoring]
+    end
     
-    System_Ext(telegram, "Telegram API", "Внешний API Telegram")
-    System_Ext(heleket, "Heleket Payment", "Платежная система")
-    System_Ext(monitoring, "Monitoring", "Prometheus + Grafana")
+    subgraph "Telegram Bot System"
+        BOT[🤖 Bot Application]
+        WEB[🌐 Web Application]
+        DB[(🗄️ Database)]
+        CACHE[(📦 Cache)]
+    end
     
-    Rel(user, bot, "Взаимодействует через", "Telegram")
-    Rel(bot, telegram, "Отправляет/получает сообщения", "HTTPS/WebSocket")
-    Rel(bot, heleket, "Обрабатывает платежи", "HTTPS/Webhook")
-    Rel(bot, monitoring, "Отправляет метрики", "HTTP")
+    USER -->|Messages| TG
+    TG -->|Updates| BOT
+    BOT -->|Responses| TG
+    
+    BOT -->|Payment Requests| HELEKET
+    HELEKET -->|Webhooks| WEB
+    
+    BOT -->|Store Data| DB
+    WEB -->|Store Data| DB
+    
+    BOT -->|Cache| CACHE
+    WEB -->|Cache| CACHE
+    
+    BOT -->|Metrics| MON
+    WEB -->|Metrics| MON
 ```
 
 ### Контейнерная диаграмма
 
 ```mermaid
-C4Container
-    title Контейнерная диаграмма
-
-    Person(user, "Пользователь")
+graph TB
+    subgraph "External"
+        USER[👤 User]
+        TG_API[📱 Telegram API]
+        HELEKET_API[💳 Heleket API]
+    end
     
-    Container_Boundary(system, "Telegram Bot System") {
-        Container(webapp, "Web Application", "Python/FastAPI", "Обработка вебхуков и API")
-        Container(bot, "Bot Application", "Python/aiogram", "Обработка сообщений Telegram")
-        Container(db, "Database", "PostgreSQL", "Хранение пользователей, балансов, транзакций")
-        Container(cache, "Cache", "Redis Cluster", "Кеширование и сессии")
-        Container(nginx, "Load Balancer", "Nginx", "Балансировка нагрузки и SSL")
-    }
+    subgraph "Load Balancer"
+        NGINX[🔀 Nginx]
+    end
     
-    System_Ext(telegram, "Telegram API")
-    System_Ext(heleket, "Heleket API")
+    subgraph "Application Layer"
+        BOT_APP[🤖 Bot Application<br/>Python/aiogram]
+        WEB_APP[🌐 Web Application<br/>Python/FastAPI]
+    end
     
-    Rel(user, nginx, "HTTPS")
-    Rel(nginx, webapp, "HTTP")
-    Rel(nginx, bot, "HTTP")
-    Rel(webapp, db, "SQL")
-    Rel(bot, db, "SQL")
-    Rel(webapp, cache, "Redis Protocol")
-    Rel(bot, cache, "Redis Protocol")
-    Rel(bot, telegram, "HTTPS")
-    Rel(webapp, heleket, "HTTPS")
+    subgraph "Data Layer"
+        PG[(🗄️ PostgreSQL<br/>Database)]
+        REDIS[(📦 Redis Cluster<br/>Cache)]
+    end
+    
+    USER -->|HTTPS| NGINX
+    TG_API -->|Webhooks| NGINX
+    HELEKET_API -->|Webhooks| NGINX
+    
+    NGINX -->|HTTP| BOT_APP
+    NGINX -->|HTTP| WEB_APP
+    
+    BOT_APP -->|SQL| PG
+    WEB_APP -->|SQL| PG
+    
+    BOT_APP -->|Redis Protocol| REDIS
+    WEB_APP -->|Redis Protocol| REDIS
+    
+    BOT_APP -->|HTTPS| TG_API
+    WEB_APP -->|HTTPS| HELEKET_API
 ```
 
 ## 🔄 Потоки данных
