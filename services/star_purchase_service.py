@@ -58,17 +58,46 @@ class StarPurchaseService(StarPurchaseServiceInterface):
             }
 
     async def _create_star_purchase_with_balance(self, user_id: int, amount: int) -> Dict[str, Any]:
-        """Покупка звезд с баланса пользователя"""
+        """Покупка звезд с баланса пользователя (оптимизированная версия)"""
         try:
-            # Получаем текущий баланс пользователя
+            import asyncio
+            
+            # Быстрая проверка баланса из кеша
+            if self.user_cache:
+                cached_balance = await self.user_cache.get_user_balance(user_id)
+                if cached_balance is not None:
+                    current_balance = float(cached_balance)
+                    # Быстрая проверка достаточности средств
+                    if current_balance < amount:
+                        return {
+                            "status": "failed",
+                            "error": "Insufficient balance",
+                            "current_balance": current_balance,
+                            "required_amount": amount
+                        }
+                    
+                    # Если баланс достаточен, запускаем операцию асинхронно
+                    return await self._process_balance_purchase_fast(user_id, amount, current_balance)
+            
+            # Fallback: получаем баланс из базы данных
             balance_data = await self.balance_repository.get_user_balance(user_id)
             if not balance_data:
-                return {
-                    "status": "failed",
-                    "error": "User balance not found"
-                }
+                # Создаем баланс для нового пользователя асинхронно
+                create_task = asyncio.create_task(self.balance_repository.create_user_balance(user_id, 0.0))
+                await create_task
+                balance_data = await self.balance_repository.get_user_balance(user_id)
+                
+                if not balance_data:
+                    return {
+                        "status": "failed",
+                        "error": "Failed to create user balance"
+                    }
 
             current_balance = float(balance_data["balance"])
+            
+            # Кешируем баланс для будущих операций
+            if self.user_cache:
+                asyncio.create_task(self.user_cache.cache_user_balance(user_id, int(current_balance)))
 
             # Проверяем достаточность средств
             if current_balance < amount:
@@ -125,13 +154,14 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 }
             )
 
-            # Инвалидируем кеш пользователя
+            # Обновляем кеш с новым балансом
+            new_balance = current_balance - amount
             if self.user_cache:
-                await self.user_cache.invalidate_user_cache(user_id)
+                await self.user_cache.cache_user_balance(user_id, int(new_balance))
 
             # Получаем обновленный баланс
             updated_balance_data = await self.balance_repository.get_user_balance(user_id)
-            updated_balance = float(updated_balance_data["balance"]) if updated_balance_data else 0
+            updated_balance = float(updated_balance_data["balance"]) if updated_balance_data else new_balance
 
             return {
                 "status": "success",
@@ -139,7 +169,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 "transaction_id": transaction_id,
                 "stars_count": amount,
                 "old_balance": current_balance,
-                "new_balance": updated_balance,
+                "new_balance": new_balance,
                 "currency": "TON",
                 "message": f"✅ Успешно куплено {amount} звезд с баланса"
             }
@@ -474,6 +504,87 @@ class StarPurchaseService(StarPurchaseServiceInterface):
         except Exception as e:
             self.logger.error(f"Error validating webhook signature: {e}")
             return False
+
+    async def _process_balance_purchase_fast(self, user_id: int, amount: int, current_balance: float) -> Dict[str, Any]:
+        """Быстрая обработка покупки с баланса"""
+        try:
+            import asyncio
+            from datetime import datetime
+            
+            # Создаем транзакцию и обновляем баланс параллельно
+            transaction_task = asyncio.create_task(
+                self.balance_repository.create_transaction(
+                    user_id=user_id,
+                    transaction_type=TransactionType.PURCHASE,
+                    amount=float(amount),
+                    description=f"Покупка {amount} звезд с баланса",
+                    external_id=f"balance_purchase_{user_id}_{int(time.time())}",
+                    metadata={
+                        "stars_count": amount,
+                        "purchase_type": "balance",
+                        "created_at": datetime.utcnow().isoformat()
+                    }
+                )
+            )
+            
+            balance_update_task = asyncio.create_task(
+                self.balance_repository.update_user_balance(user_id, float(amount), "subtract")
+            )
+            
+            # Ждем завершения обеих операций
+            transaction_id, balance_success = await asyncio.gather(
+                transaction_task, balance_update_task, return_exceptions=True
+            )
+            
+            if isinstance(transaction_id, Exception) or isinstance(balance_success, Exception):
+                return {
+                    "status": "failed",
+                    "error": "Failed to process transaction"
+                }
+            
+            if not transaction_id or not balance_success:
+                return {
+                    "status": "failed",
+                    "error": "Failed to update balance or create transaction"
+                }
+            
+            # Обновляем статус транзакции асинхронно (не ждем)
+            asyncio.create_task(
+                self.balance_repository.update_transaction_status(
+                    transaction_id,
+                    TransactionStatus.COMPLETED,
+                    metadata={
+                        "completed_at": datetime.utcnow().isoformat(),
+                        "stars_count": amount,
+                        "purchase_type": "balance",
+                        "balance_updated": True
+                    }
+                )
+            )
+            
+            # Обновляем кеш с новым балансом асинхронно (не ждем)
+            new_balance = current_balance - amount
+            if self.user_cache:
+                asyncio.create_task(self.user_cache.cache_user_balance(user_id, int(new_balance)))
+            
+            # Возвращаем результат быстро
+            return {
+                "status": "success",
+                "purchase_type": "balance",
+                "transaction_id": transaction_id,
+                "stars_count": amount,
+                "old_balance": current_balance,
+                "new_balance": new_balance,
+                "currency": "TON",
+                "message": f"✅ Успешно куплено {amount} звезд с баланса"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error in fast balance purchase for user {user_id}: {e}")
+            return {
+                "status": "failed",
+                "error": str(e)
+            }
 
     async def get_purchase_statistics(self, user_id: int) -> Dict[str, Any]:
         """Получение статистики покупок пользователя"""

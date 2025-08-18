@@ -339,9 +339,10 @@ class ErrorHandler(BaseHandler):
                                         parse_mode="HTML")
         elif action == "support":
             # Показываем экран помощи
+            from config.settings import settings
             await callback.message.answer("🤖 <b>Помощь и поддержка</b> 🤖\n\n"
                                         "📞 <i>Свяжитесь с нашей поддержкой для решения проблемы</i>\n\n"
-                                        "📧 <i>support@example.com</i>\n\n"
+                                        f"👤 <i>Контакт: {settings.support_contact}</i>\n\n"
                                         "⏰ <i>Ответ в течение 24 часов</i>",
                                         parse_mode="HTML")
         else:

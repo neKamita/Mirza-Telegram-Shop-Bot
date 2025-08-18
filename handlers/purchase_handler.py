@@ -127,7 +127,7 @@ class PurchaseHandler(BaseHandler):
 
     async def _buy_stars_preset_impl(self, message_or_callback: Union[Message, CallbackQuery], bot: Bot, amount: int) -> None:
         """
-        Реализация покупки预设 пакетов звезд
+        Реализация покупки预设 пакетов звезд (только через баланс) - оптимизированная версия
         
         Args:
             message_or_callback: Сообщение или callback запрос
@@ -142,13 +142,28 @@ class PurchaseHandler(BaseHandler):
         message = message_or_callback.message if is_callback else message_or_callback
 
         try:
-            # Используем новый сервис покупки звезд
-            purchase_result = await self.star_purchase_service.create_star_purchase(user_id, amount)
+            # Показываем быстрый индикатор загрузки
+            if is_callback:
+                await message_or_callback.answer("⏳ Обрабатываем покупку...", show_alert=False)
+            
+            # Используем новый сервис покупки звезд (только через баланс)
+            purchase_result = await self.star_purchase_service.create_star_purchase(user_id, amount, purchase_type="balance")
 
             if purchase_result["status"] == "failed":
                 error_msg = purchase_result.get("error", "Неизвестная ошибка")
                 
-                # Используем ErrorHandler для обработки ошибки
+                # Специальная обработка для недостаточного баланса
+                if "Insufficient balance" in error_msg:
+                    await self._handle_insufficient_balance_error(
+                        message_or_callback, 
+                        user_id, 
+                        amount,
+                        purchase_result.get("current_balance", 0),
+                        purchase_result.get("required_amount", amount)
+                    )
+                    return
+                
+                # Используем ErrorHandler для обработки других ошибок
                 error_type = await self.error_handler.handle_purchase_error(Exception(error_msg), {"user_id": user_id, "amount": amount})
                 
                 # Показываем ошибку с рекомендациями
@@ -159,75 +174,46 @@ class PurchaseHandler(BaseHandler):
                 )
                 return
 
-            result = purchase_result.get("result", {})
-            transaction_id = purchase_result.get("transaction_id")
-
-            if not result or "uuid" not in result or "url" not in result:
-                if message:
-                    try:
-                        if is_callback:
-                            await message.edit_text("❌ Ошибка: некорректные данные от платежной системы")
-                        else:
-                            await message.answer("❌ Ошибка: некорректные данные от платежной системы")
-                    except Exception as e:
-                        self.logger.error(f"Error editing/answering message in buy_stars_preset data error case: {e}")
-                        await message.answer("❌ Ошибка: некорректные данные от платежной системы")
-                return
+            # Поскольку теперь покупка идет только через баланс, показываем успешное сообщение
+            old_balance = purchase_result.get("old_balance", 0)
+            new_balance = purchase_result.get("new_balance", 0)
+            stars_count = purchase_result.get("stars_count", 0)
 
             builder = InlineKeyboardBuilder()
             builder.row(
-                InlineKeyboardButton(
-                    text="🔍 Проверить оплату",
-                    callback_data=f"check_payment_{result['uuid']}"
-                )
+                InlineKeyboardButton(text="📊 История покупок", callback_data="balance_history"),
+                InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
             )
-            builder.row(
-                InlineKeyboardButton(
-                    text="⬅️ Назад",
-                    callback_data="back_to_buy_stars"
-                )
+
+            success_message = (
+                f"🎉 <b>Покупка успешна!</b> 🎉\n\n"
+                f"⭐ <b>Куплено звезд:</b> {stars_count}\n"
+                f"💰 <b>Баланс до:</b> {old_balance:.2f} TON\n"
+                f"💰 <b>Баланс после:</b> {new_balance:.2f} TON\n\n"
+                f"🌟 <i>Спасибо за покупку!</i> 🌟\n\n"
+                f"✨ Ваши звезды уже доступны для использования!"
             )
 
             if message:
                 try:
-                    # Добавляем статус оплаты в сообщение
-                    status_line = self._format_payment_status("pending")
-                    
                     if is_callback:
                         await message.edit_text(
-                            f"✅ <b>Создан счет на покупку {amount} звезд</b> ✅\n\n"
-                            f"💳 <b>Ссылка на оплату:</b> {result['url']}\n\n"
-                            f"📋 <b>ID счета:</b> {result['uuid']}\n"
-                            f"🔢 <b>ID транзакции:</b> {transaction_id}\n"
-                            f"{status_line}\n\n"
-                            f"🔗 <i>Перейдите по ссылке для оплаты</i>\n"
-                            f"⏰ <i>Счет действителен в течение 15 минут</i>",
+                            success_message,
                             reply_markup=builder.as_markup(),
                             parse_mode="HTML"
                         )
                     else:
                         await message.answer(
-                            f"✅ <b>Создан счет на покупку {amount} звезд</b> ✅\n\n"
-                            f"💳 <b>Ссылка на оплату:</b> {result['url']}\n\n"
-                            f"📋 <b>ID счета:</b> {result['uuid']}\n"
-                            f"🔢 <b>ID транзакции:</b> {transaction_id}\n"
-                            f"{status_line}\n\n"
-                            f"🔗 <i>Перейдите по ссылке для оплаты</i>\n"
-                            f"⏰ <i>Счет действителен в течение 15 минут</i>",
+                            success_message,
                             reply_markup=builder.as_markup(),
                             parse_mode="HTML"
                         )
                 except Exception as e:
                     self.logger.error(f"Error editing/answering message in buy_stars_preset success case: {e}")
-                    # В случае ошибки редактирования, отправляем новое сообщение со статусом
-                    status_line = self._format_payment_status("pending")
                     await message.answer(
-                        f"✅ Создан счет на покупку {amount} звезд.\n\n"
-                        f"💳 Ссылка на оплату: {result['url']}\n\n"
-                        f"📋 ID счета: {result['uuid']}\n"
-                        f"🔢 ID транзакции: {transaction_id}\n"
-                        f"{status_line}",
-                        reply_markup=builder.as_markup()
+                        success_message,
+                        reply_markup=builder.as_markup(),
+                        parse_mode="HTML"
                     )
 
         except Exception as e:
@@ -268,7 +254,7 @@ class PurchaseHandler(BaseHandler):
 
     async def _buy_stars_custom_impl(self, message_or_callback: Union[Message, CallbackQuery], bot: Bot, amount: int) -> None:
         """
-        Реализация покупки кастомного количества звезд
+        Реализация покупки кастомного количества звезд (только через баланс)
         
         Args:
             message_or_callback: Сообщение или callback запрос
@@ -283,8 +269,8 @@ class PurchaseHandler(BaseHandler):
         message = message_or_callback.message if is_callback else message_or_callback
 
         try:
-            # Используем новый сервис покупки звезд
-            purchase_result = await self.star_purchase_service.create_star_purchase(user_id, amount)
+            # Используем новый сервис покупки звезд (только через баланс)
+            purchase_result = await self.star_purchase_service.create_star_purchase(user_id, amount, purchase_type="balance")
 
             if purchase_result["status"] == "failed":
                 error_msg = purchase_result.get("error", "Неизвестная ошибка")
@@ -614,3 +600,94 @@ class PurchaseHandler(BaseHandler):
                 
         except Exception as e:
             self.logger.error(f"Error showing rate limit message: {e}")
+
+    async def _handle_insufficient_balance_error(self, message_or_callback, user_id: int, required_amount: int, current_balance: float, required_balance: float) -> None:
+        """
+        Специальная обработка ошибки недостаточного баланса
+        
+        Args:
+            message_or_callback: Сообщение или callback запрос
+            user_id: ID пользователя
+            required_amount: Требуемое количество звезд
+            current_balance: Текущий баланс пользователя
+            required_balance: Требуемый баланс для покупки
+        """
+        from utils.message_templates import MessageTemplate
+        
+        missing_amount = max(0, required_balance - current_balance)
+        
+        # Создаем специальное сообщение
+        insufficient_balance_message = MessageTemplate.get_insufficient_balance_message(
+            current_balance=current_balance,
+            required_amount=required_amount,
+            missing_amount=missing_amount
+        )
+        
+        # Создаем клавиатуру с действиями
+        builder = InlineKeyboardBuilder()
+        
+        # Кнопка пополнения баланса на недостающую сумму (округляем вверх)
+        recharge_amount = int(missing_amount) + 1 if missing_amount % 1 > 0 else int(missing_amount)
+        builder.row(
+            InlineKeyboardButton(
+                text=f"💳 Пополнить на {recharge_amount} TON", 
+                callback_data=f"recharge_{recharge_amount}"
+            )
+        )
+        
+        # Кнопки для покупки меньшего количества звезд
+        if required_amount > 100:
+            builder.row(
+                InlineKeyboardButton(text="⭐ Купить 100 звезд", callback_data="buy_100"),
+                InlineKeyboardButton(text="⭐ Купить 50 звезд", callback_data="buy_50")
+            )
+        elif required_amount > 50:
+            builder.row(
+                InlineKeyboardButton(text="⭐ Купить 50 звезд", callback_data="buy_50"),
+                InlineKeyboardButton(text="⭐ Купить 25 звезд", callback_data="buy_25")
+            )
+        elif required_amount > 25:
+            builder.row(
+                InlineKeyboardButton(text="⭐ Купить 25 звезд", callback_data="buy_25"),
+                InlineKeyboardButton(text="⭐ Купить 10 звезд", callback_data="buy_10")
+            )
+        
+        # Кнопки навигации
+        builder.row(
+            InlineKeyboardButton(text="💰 Мой баланс", callback_data="balance"),
+            InlineKeyboardButton(text="📊 История", callback_data="balance_history")
+        )
+        builder.row(
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
+        )
+        
+        # Отправляем сообщение
+        try:
+            if isinstance(message_or_callback, CallbackQuery) and message_or_callback.message:
+                await message_or_callback.message.edit_text(
+                    insufficient_balance_message,
+                    reply_markup=builder.as_markup(),
+                    parse_mode="HTML"
+                )
+            else:
+                message = message_or_callback.message if isinstance(message_or_callback, CallbackQuery) else message_or_callback
+                if message:
+                    await message.answer(
+                        insufficient_balance_message,
+                        reply_markup=builder.as_markup(),
+                        parse_mode="HTML"
+                    )
+        except Exception as e:
+            self.logger.error(f"Error showing insufficient balance message: {e}")
+            # Fallback - простое текстовое сообщение
+            fallback_message = (
+                f"❌ Недостаточно средств на балансе\n\n"
+                f"💰 Ваш баланс: {current_balance:.2f} TON\n"
+                f"⭐ Нужно для покупки {required_amount} звезд: {required_balance:.2f} TON\n"
+                f"❌ Не хватает: {missing_amount:.2f} TON\n\n"
+                f"💡 Пополните баланс или выберите меньшее количество звезд"
+            )
+            if isinstance(message_or_callback, CallbackQuery):
+                await message_or_callback.answer(fallback_message, show_alert=True)
+            else:
+                await message_or_callback.answer(fallback_message)

@@ -51,9 +51,10 @@ class BalanceRepository:
                 if existing_balance:
                     return True
 
+                from decimal import Decimal
                 stmt = insert(Balance).values(
                     user_id=user_id,
-                    amount=initial_amount,
+                    amount=Decimal(str(initial_amount)),
                     currency=currency
                 )
                 await session.execute(stmt)
@@ -83,13 +84,16 @@ class BalanceRepository:
                     await self.create_user_balance(user_id, amount if operation == "set" else 0, currency)
                     balance = await session.get(Balance, user_id)
 
-                # Выполняем операцию
+                # Выполняем операцию (преобразуем float в Decimal для совместимости)
+                from decimal import Decimal
+                amount_decimal = Decimal(str(amount))
+                
                 if operation == "add":
-                    balance.amount += amount
+                    balance.amount += amount_decimal
                 elif operation == "subtract":
-                    balance.amount -= amount
+                    balance.amount -= amount_decimal
                 elif operation == "set":
-                    balance.amount = amount
+                    balance.amount = amount_decimal
                 else:
                     raise ValueError(f"Unknown operation: {operation}")
 
@@ -111,11 +115,12 @@ class BalanceRepository:
                 # Преобразуем метаданные в JSON строку
                 metadata_json = json.dumps(metadata) if metadata else None
 
+                from decimal import Decimal
                 stmt = insert(Transaction).values(
                     user_id=user_id,
                     transaction_type=transaction_type,
                     status=status,
-                    amount=amount,
+                    amount=Decimal(str(amount)),
                     currency=currency,
                     description=description,
                     external_id=external_id,

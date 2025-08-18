@@ -156,6 +156,9 @@ class Settings:
         self.log_level: str = os.getenv("LOG_LEVEL", "INFO")
         self.environment: str = os.getenv("ENVIRONMENT", "development")
 
+        # Support Configuration
+        self.support_contact: str = os.getenv("SUPPORT_CONTACT", "@Mirza")
+
 
 # Глобальный экземпляр настроек
 settings = Settings()

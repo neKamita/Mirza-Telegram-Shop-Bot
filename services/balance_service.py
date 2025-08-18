@@ -39,15 +39,20 @@ class BalanceService(BalanceServiceInterface):
         # Если в кеше нет, получаем из базы данных
         balance_data = await self.balance_repository.get_user_balance(user_id)
         if balance_data:
-            # Кешируем результат
+            # Кешируем результат с увеличенным TTL
             if self.user_cache:
                 await self.user_cache.cache_user_balance(user_id, int(balance_data["balance"]))
 
             balance_data["source"] = "database"
             return balance_data
         else:
-            # Если баланса нет, создаем его
+            # Если баланса нет, создаем его и сразу кешируем
             await self.balance_repository.create_user_balance(user_id, 0)
+            
+            # Кешируем нулевой баланс для новых пользователей
+            if self.user_cache:
+                await self.user_cache.cache_user_balance(user_id, 0)
+            
             return {
                 "user_id": user_id,
                 "balance": 0,
