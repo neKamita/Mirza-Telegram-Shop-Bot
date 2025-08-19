@@ -289,6 +289,9 @@ class MessageHandler(BaseHandler):
             InlineKeyboardButton(text="💰 С баланса", callback_data="buy_stars_balance")
         )
         builder.row(
+            InlineKeyboardButton(text="💎 Через Fragment", callback_data="buy_stars_fragment")
+        )
+        builder.row(
             InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
         )
         
@@ -297,7 +300,8 @@ class MessageHandler(BaseHandler):
                 "⭐ <b>Покупка звезд</b> ⭐\n\n"
                 "🎯 <i>Выберите способ оплаты:</i>\n\n"
                 f"💳 <i>Картой/Кошельком - оплата через Heleket</i>\n"
-                f"💰 <i>С баланса - списание со счета</i>\n\n"
+                f"💰 <i>С баланса - списание со счета</i>\n"
+                f"💎 <i>Через Fragment - прямая покупка</i>\n\n"
                 f"✨ <i>Каждая звезда имеет ценность!</i>",
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML"
@@ -316,7 +320,8 @@ class MessageHandler(BaseHandler):
                         "⭐ <b>Покупка звезд</b> ⭐\n\n"
                         "🎯 <i>Выберите способ оплаты:</i>\n\n"
                         f"💳 <i>Картой/Кошельком - оплата через Heleket</i>\n"
-                        f"💰 <i>С баланса - списание со счета</i>\n\n"
+                        f"💰 <i>С баланса - списание со счета</i>\n"
+                        f"💎 <i>Через Fragment - прямая покупка</i>\n\n"
                         f"✨ <i>Каждая звезда имеет ценность!</i>",
                         reply_markup=builder.as_markup(),
                         parse_mode="HTML"

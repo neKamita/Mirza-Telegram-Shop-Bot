@@ -24,6 +24,7 @@
 
 - [🏗️ Детальная архитектура](docs/ARCHITECTURE.md) - Подробные диаграммы компонентов и паттернов
 - [🚀 Развертывание и DevOps](docs/DEPLOYMENT.md) - CI/CD, Docker, инфраструктура
+- [💎 Fragment API](docs/fragment.md) - Интеграция с Telegram Fragment для покупки звезд
 
 
 ## 🏗️ Архитектура
@@ -35,6 +36,7 @@ graph TB
     subgraph "External Services"
         TG[Telegram API]
         HELEKET[Heleket Payment API]
+        FRAGMENT[Telegram Fragment API]
     end
 
     subgraph "Load Balancer"
@@ -52,6 +54,7 @@ graph TB
         PS[Payment Service]
         BS[Balance Service]
         SPS[Star Purchase Service]
+        FS[Fragment Service]
         RL[Rate Limiter]
     end
 
@@ -68,6 +71,7 @@ graph TB
 
     TG --> NGINX
     HELEKET --> NGINX
+    FRAGMENT --> NGINX
     NGINX --> BOT
     NGINX --> WEBHOOK
     NGINX --> API
@@ -77,12 +81,14 @@ graph TB
     MH --> PS
     MH --> BS
     MH --> SPS
+    MH --> FS
     MH --> RL
 
     PS --> UR
     BS --> BR
     SPS --> UR
     SPS --> BR
+    FS --> FRAGMENT
     RL --> CACHE
 
     UR --> PG
@@ -108,6 +114,7 @@ flowchart LR
         PS["💳 Payment Service"]
         BS["💰 Balance Service"]
         SPS["⭐ Star Purchase Service"]
+        FS["💎 Fragment Service"]
         CS["🗄️ Cache Service"]
         RL["🚦 Rate Limiter"]
         HS["❤️ Health Service"]
@@ -127,6 +134,7 @@ flowchart LR
     MH --> PS
     MH --> BS
     MH --> SPS
+    MH --> FS
     PH --> PS
     PuH --> SPS
     BalH --> BS
@@ -135,6 +143,7 @@ flowchart LR
     BS --> BR
     SPS --> UR
     SPS --> BR
+    FS --> SPS
 
     PS --> CS
     BS --> CS
@@ -157,6 +166,7 @@ graph TD
         PS["💳 Payment Service"]
         BS["💰 Balance Service"]
         SPS["⭐ Star Purchase Service"]
+        FS["💎 Fragment Service"]
         RL["🚦 Rate Limiter"]
     end
     
@@ -172,6 +182,7 @@ graph TD
     
     %% Connections between layers
     MH --> PS
+    MH --> FS
     PH --> PS
     PuH --> SPS
     BH --> BS
@@ -180,10 +191,12 @@ graph TD
     BS --> BR
     SPS --> UR
     SPS --> BR
+    FS --> SPS
     
     PS --> INT
     BS --> INT
     SPS --> INT
+    FS --> INT
     RL --> INT
     
     UR --> CFG
@@ -282,6 +295,7 @@ graph LR
 | **SQLAlchemy** | 2.0+ | ORM для работы с БД |
 | **Alembic** | 1.13+ | Миграции БД |
 | **asyncpg** | 0.29+ | Асинхронный PostgreSQL драйвер |
+| **fragment-api-lib** | 1.0+ | Библиотека для работы с Telegram Fragment API |
 
 ### Инфраструктура
 
@@ -422,6 +436,40 @@ graph TB
 | **redis-node-2** | 7380 | Redis кластер - узел 2 |
 | **redis-node-3** | 7381 | Redis кластер - узел 3 |
 
+### Автоматическое обновление Fragment cookies
+
+При включенной настройке `FRAGMENT_AUTO_COOKIE_REFRESH=true`:
+
+- Контейнер автоматически устанавливает Chrome и ChromeDriver
+- При каждом запуске происходит обновление Fragment cookies
+- Во время работы приложения cookies автоматически обновляются при истечении срока действия
+- Фоновая задача периодически обновляет cookies с интервалом `FRAGMENT_COOKIE_REFRESH_INTERVAL`
+- Cookies сохраняются в файл и используются для всех операций Fragment API
+
+### Ручное обновление cookies
+
+Для ручного обновления cookies:
+
+```bash
+# В контейнере
+python scripts/update_fragment_cookies.py
+
+# Или через docker-compose
+docker-compose exec app python scripts/update_fragment_cookies.py
+```
+
+### Проверка состояния Fragment API
+
+Для проверки состояния Fragment API:
+
+```bash
+# В контейнере
+python scripts/check_fragment_status.py
+
+# Или через docker-compose
+docker-compose exec app python scripts/check_fragment_status.py
+```
+
 ## 📡 API и Вебхуки
 
 ### Webhook эндпоинты
@@ -548,6 +596,10 @@ graph LR
 | **Telegram** | `TELEGRAM_TOKEN` | - | Токен Telegram бота |
 | **Heleket** | `MERCHANT_UUID` | - | UUID мерчанта |
 | **Heleket** | `API_KEY` | - | API ключ |
+| **Fragment** | `FRAGMENT_SEED_PHRASE` | - | 24-словная seed фраза TON кошелька (⚠️ СЕКРЕТ!) |
+| **Fragment** | `FRAGMENT_COOKIES` | - | Cookies для авторизации в Fragment |
+| **Fragment** | `FRAGMENT_AUTO_COOKIE_REFRESH` | `false` | Автоматическое обновление cookies |
+| **Fragment** | `FRAGMENT_COOKIE_REFRESH_INTERVAL` | `3600` | Интервал обновления cookies (сек) |
 | **Database** | `DATABASE_URL` | `postgresql+asyncpg://...` | URL базы данных |
 | **Redis** | `REDIS_URL` | `redis://localhost:7379` | URL Redis |
 
@@ -612,6 +664,10 @@ pytest tests/unit/
 
 # Только integration тесты
 pytest tests/integration/
+
+# Тесты Fragment API
+pytest tests/test_fragment_service.py
+pytest tests/test_star_purchase_fragment.py
 ```
 
 ### Структура тестов
@@ -622,20 +678,21 @@ graph TD
         TESTS["📁 tests/"]
         
         subgraph "🔬 Unit Tests"
-            UNIT["📁 unit/"]
+            UNIT[("📁 unit/")]
             UNIT_SERVICES["📁 test_services/"]
-            UNIT_REPOS["📁 test_repositories/"]
-            UNIT_HANDLERS["📁 test_handlers/"]
+            UNIT_REPOS[("📁 test_repositories/")]
+            UNIT_HANDLERS[("📁 test_handlers/")]
         end
         
         subgraph "🔗 Integration Tests"
-            INTEGRATION["📁 integration/"]
-            INT_PAYMENT["📁 test_payment_flow/"]
-            INT_WEBHOOK["📁 test_webhook_processing/"]
+            INTEGRATION[("📁 integration/")]
+            INT_PAYMENT[("📁 test_payment_flow/")]
+            INT_WEBHOOK[("📁 test_webhook_processing/")]
+            INT_FRAGMENT[("📁 test_fragment_integration/")]
         end
         
         subgraph "🛠️ Test Fixtures"
-            FIXTURES["📁 fixtures/"]
+            FIXTURES[("📁 fixtures/")]
             FIX_DB["📄 database.py"]
             FIX_REDIS["📄 redis.py"]
         end
@@ -651,6 +708,7 @@ graph TD
     
     INTEGRATION --> INT_PAYMENT
     INTEGRATION --> INT_WEBHOOK
+    INTEGRATION --> INT_FRAGMENT
     
     FIXTURES --> FIX_DB
     FIXTURES --> FIX_REDIS
@@ -673,9 +731,7 @@ graph TD
 - **Database Sharding**: разделение данных
 - **Load Balancing**: распределение нагрузки
 
-## 🔐 Безопасность
-
-### Меры безопасности
+### 🔐 Безопасность
 
 - ✅ **MD5 подписи** для вебхуков
 - ✅ **SSL/TLS** шифрование
@@ -683,6 +739,9 @@ graph TD
 - ✅ **Input Validation** валидация входных данных
 - ✅ **SQL Injection** защита через ORM
 - ✅ **Environment Variables** для секретов
+- ✅ **Seed Phrase Protection** хранение seed фразы в защищенном виде
+- ✅ **Cookie Management** безопасное хранение cookies Fragment
+- ✅ **Pre-flight Checks** автоматическая проверка настроек при запуске
 
 ### Рекомендации
 
@@ -691,6 +750,9 @@ graph TD
 3. Мониторьте логи на подозрительную активность
 4. Используйте HTTPS для всех внешних соединений
 5. Настройте firewall для ограничения доступа
+6. Храните seed фразу TON кошелька в защищенном месте
+7. Регулярно обновляйте cookies Fragment API
+8. Используйте предварительную проверку настроек перед запуском: `python scripts/precheck_fragment.py`
 
 ## 📝 Лицензия
 

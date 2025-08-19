@@ -1,409 +1,521 @@
-# 🏗️ Архитектурная документация
+# 🏗️ Детальная архитектура Telegram Bot
 
-## Обзор архитектуры
+## 📋 Содержание
 
-Данный документ содержит детальное описание архитектуры Telegram бота с системой платежей, включая диаграммы компонентов, потоков данных и взаимодействий между сервисами.
+- [🏗️ Общая архитектура](#️-общая-архитектура)
+- [🧩 Компонентная архитектура](#-компонетная-архитектура)
+- [💾 Структура базы данных](#-структура-базы-данных)
+- [🔄 Потоки данных](#-потоки-данных)
+- [🛡️ Паттерны проектирования](#️-паттерны-проектирования)
+- [📈 Масштабируемость](#-масштабируемость)
 
-## 🎯 Архитектура компонентов
+## 🏗️ Общая архитектура
 
-### Общая схема взаимодействия
+### Концепция Clean Architecture
 
 ```mermaid
 graph TB
-    subgraph "External Systems"
-        USER[👤 User]
-        TG[📱 Telegram API]
-        HELEKET[💳 Heleket Payment]
-        MON[📊 Monitoring]
+    subgraph "Presentation Layer"
+        TG[Telegram API]
+        REST[REST API]
+        WEBHOOK[Webhook Handler]
     end
-    
-    subgraph "Telegram Bot System"
-        BOT[🤖 Bot Application]
-        WEB[🌐 Web Application]
-        DB[(🗄️ Database)]
-        CACHE[(📦 Cache)]
+
+    subgraph "Application Layer"
+        MH[Message Handler]
+        PH[Payment Handler]
+        PuH[Purchase Handler]
+        BalH[Balance Handler]
+        EH[Error Handler]
     end
+
+    subgraph "Business Logic Layer"
+        PS[Payment Service]
+        BS[Balance Service]
+        SPS[Star Purchase Service]
+        FS[Fragment Service]
+        RL[Rate Limiter]
+        CS[Cache Service]
+    end
+
+    subgraph "Data Layer"
+        UR[User Repository]
+        BR[Balance Repository]
+        DB[(Database)]
+        CACHE[(Cache)]
+    end
+
+    TG --> MH
+    REST --> MH
+    WEBHOOK --> PS
     
-    USER -->|Messages| TG
-    TG -->|Updates| BOT
-    BOT -->|Responses| TG
+    MH --> PS
+    MH --> BS
+    MH --> SPS
+    MH --> FS
+    MH --> RL
+    MH --> EH
     
-    BOT -->|Payment Requests| HELEKET
-    HELEKET -->|Webhooks| WEB
+    PH --> PS
+    PuH --> SPS
+    BalH --> BS
     
-    BOT -->|Store Data| DB
-    WEB -->|Store Data| DB
+    PS --> UR
+    BS --> BR
+    SPS --> UR
+    SPS --> BR
+    FS --> UR
     
-    BOT -->|Cache| CACHE
-    WEB -->|Cache| CACHE
+    UR --> DB
+    BR --> DB
+    CS --> CACHE
     
-    BOT -->|Metrics| MON
-    WEB -->|Metrics| MON
+    PS --> CS
+    BS --> CS
+    SPS --> CS
+    RL --> CS
 ```
 
-### Контейнерная диаграмма
+### Многоуровневая архитектура
 
 ```mermaid
-graph TB
-    subgraph "External"
-        USER[👤 User]
-        TG_API[📱 Telegram API]
-        HELEKET_API[💳 Heleket API]
+graph TD
+    subgraph "🎯 PRESENTATION LAYER"
+        PL_TG[Telegram Bot]
+        PL_REST[REST API]
+        PL_WEBHOOK[Webhook Service]
     end
     
-    subgraph "Load Balancer"
-        NGINX[🔀 Nginx]
+    subgraph "🔧 APPLICATION LAYER"
+        AL_HANDLERS[Handlers]
+        AL_CONTROLLERS[Controllers]
     end
     
-    subgraph "Application Layer"
-        BOT_APP[🤖 Bot Application<br/>Python/aiogram]
-        WEB_APP[🌐 Web Application<br/>Python/FastAPI]
+    subgraph "⚙️ BUSINESS LOGIC LAYER"
+        BLL_SERVICES[Services]
+        BLL_VALIDATORS[Validators]
+        BLL_PROCESSORS[Processors]
     end
     
-    subgraph "Data Layer"
-        PG[(🗄️ PostgreSQL<br/>Database)]
-        REDIS[(📦 Redis Cluster<br/>Cache)]
+    subgraph "🗄️ DATA ACCESS LAYER"
+        DAL_REPOSITORIES[Repositories]
+        DAL_ENTITIES[Entities]
     end
     
-    USER -->|HTTPS| NGINX
-    TG_API -->|Webhooks| NGINX
-    HELEKET_API -->|Webhooks| NGINX
+    subgraph "📦 INFRASTRUCTURE"
+        INF_DB[PostgreSQL]
+        INF_CACHE[Redis]
+        INF_EXTERNAL[External APIs]
+    end
     
-    NGINX -->|HTTP| BOT_APP
-    NGINX -->|HTTP| WEB_APP
+    PL_TG --> AL_HANDLERS
+    PL_REST --> AL_CONTROLLERS
+    PL_WEBHOOK --> AL_HANDLERS
     
-    BOT_APP -->|SQL| PG
-    WEB_APP -->|SQL| PG
+    AL_HANDLERS --> BLL_SERVICES
+    AL_CONTROLLERS --> BLL_SERVICES
     
-    BOT_APP -->|Redis Protocol| REDIS
-    WEB_APP -->|Redis Protocol| REDIS
+    BLL_SERVICES --> DAL_REPOSITORIES
+    BLL_VALIDATORS --> BLL_SERVICES
+    BLL_PROCESSORS --> BLL_SERVICES
     
-    BOT_APP -->|HTTPS| TG_API
-    WEB_APP -->|HTTPS| HELEKET_API
+    DAL_REPOSITORIES --> DAL_ENTITIES
+    DAL_ENTITIES --> INF_DB
+    BLL_SERVICES --> CS
+    CS --> INF_CACHE
+    
+    BLL_SERVICES --> INF_EXTERNAL
+```
+
+## 🧩 Компонентная архитектура
+
+### Handlers Layer
+
+```mermaid
+graph LR
+    subgraph "🎯 HANDLERS LAYER"
+        MH["📨 MessageHandler<br/>(aiogram integration)"]
+        PH["💳 PaymentHandler<br/>(recharge management)"]
+        PuH["🛒 PurchaseHandler<br/>(star purchases)"]
+        BalH["💰 BalanceHandler<br/>(balance queries)"]
+        EH["❌ ErrorHandler<br/>(error handling)"]
+        BH["🔧 BaseHandler<br/>(common functionality)"]
+    end
+    
+    MH --> PH
+    MH --> PuH
+    MH --> BalH
+    MH --> EH
+    MH --> BH
+    
+    PH --> BH
+    PuH --> BH
+    BalH --> BH
+    EH --> BH
+```
+
+### Services Layer
+
+```mermaid
+graph LR
+    subgraph "⚙️ SERVICES LAYER"
+        PS["💳 PaymentService<br/>(Heleket integration)"]
+        BS["💰 BalanceService<br/>(balance management)"]
+        SPS["⭐ StarPurchaseService<br/>(purchase logic)"]
+        FS["💎 FragmentService<br/>(Fragment API)"]
+        CS["🗄️ CacheService<br/>(Redis operations)"]
+        RL["🚦 RateLimitService<br/>(throttling)"]
+        HS["❤️ HealthService<br/>(monitoring)"]
+        WS["🔌 WebSocketService<br/>(real-time)"]
+    end
+    
+    PS --> CS
+    BS --> CS
+    SPS --> CS
+    FS --> CS
+    RL --> CS
+    
+    PS --> UR
+    BS --> BR
+    SPS --> UR
+    SPS --> BR
+    FS --> SPS
+```
+
+### Repository Layer
+
+```mermaid
+graph LR
+    subgraph "📊 REPOSITORY LAYER"
+        UR["👤 UserRepository<br/>(user operations)"]
+        BR["💰 BalanceRepository<br/>(balance operations)"]
+        TR["📊 TransactionRepository<br/>(transaction operations)"]
+    end
+    
+    UR --> DB
+    BR --> DB
+    TR --> DB
+```
+
+## 💾 Структура базы данных
+
+### Users Table
+
+```sql
+CREATE TABLE users (
+    user_id BIGINT PRIMARY KEY,
+    username VARCHAR(32),
+    first_name VARCHAR(64),
+    last_name VARCHAR(64),
+    is_premium BOOLEAN DEFAULT FALSE,
+    language_code VARCHAR(10),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### Balances Table
+
+```sql
+CREATE TABLE balances (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT REFERENCES users(user_id),
+    amount DECIMAL(10,2) DEFAULT 0.00,
+    currency VARCHAR(10) DEFAULT 'TON',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id)
+);
+```
+
+### Transactions Table
+
+```sql
+CREATE TYPE transaction_type AS ENUM ('purchase', 'refund', 'bonus', 'adjustment', 'recharge');
+CREATE TYPE transaction_status AS ENUM ('pending', 'processing', 'completed', 'failed', 'cancelled', 'expired');
+
+CREATE TABLE transactions (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT REFERENCES users(user_id),
+    transaction_type transaction_type,
+    status transaction_status,
+    amount DECIMAL(10,2),
+    currency VARCHAR(10) DEFAULT 'TON',
+    description TEXT,
+    external_id VARCHAR(255) UNIQUE,
+    transaction_metadata JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### Индексы
+
+```sql
+-- Индексы для оптимизации запросов
+CREATE INDEX idx_users_username ON users(username);
+CREATE INDEX idx_transactions_user_id ON transactions(user_id);
+CREATE INDEX idx_transactions_external_id ON transactions(external_id);
+CREATE INDEX idx_transactions_created_at ON transactions(created_at);
+CREATE INDEX idx_transactions_status ON transactions(status);
 ```
 
 ## 🔄 Потоки данных
 
-### Поток обработки сообщений
+### Поток покупки звезд через Fragment API
 
 ```mermaid
-flowchart TD
-    A[📱 Пользователь отправляет сообщение] --> B[🤖 Telegram Bot получает update]
-    B --> C{🔍 Тип сообщения?}
-    
-    C -->|Команда| D[⚡ Command Handler]
-    C -->|Callback| E[🔘 Callback Handler]
-    C -->|Текст| F[📝 Message Handler]
-    
-    D --> G[🚦 Rate Limiter Check]
-    E --> G
-    F --> G
-    
-    G -->|❌ Превышен лимит| H[⏰ Rate Limit Response]
-    G -->|✅ Разрешено| I[🔄 Business Logic]
-    
-    I --> J{💳 Требует платеж?}
-    J -->|Да| K[💰 Payment Service]
-    J -->|Нет| L[📊 Data Service]
-    
-    K --> M[🗄️ Database Update]
-    L --> M
-    
-    M --> N[📦 Cache Update]
-    N --> O[📤 Response to User]
-    
-    H --> O
-    O --> P[✅ Сообщение отправлено]
+sequenceDiagram
+    participant U as 👤 User
+    participant TB as 🤖 Telegram Bot
+    participant FS as 💎 Fragment Service
+    participant F as 🌐 Fragment API
+    participant DB as 🗄️ Database
+    participant C as 📦 Cache
+
+    U->>TB: /buy_stars_fragment 100
+    TB->>FS: buy_stars(username, 100)
+    FS->>DB: get_user_info(user_id)
+    DB-->>FS: user_data
+    FS->>C: check_rate_limit(user_id)
+    C-->>FS: allowed
+    FS->>F: buy_stars_without_kyc(username, 100)
+    F-->>FS: purchase_result
+    FS->>DB: create_transaction(completed)
+    FS->>C: invalidate_user_cache(user_id)
+    FS-->>TB: success/failure
+    TB-->>U: ✅ Покупка успешна! +100 ⭐
 ```
 
-### Поток обработки платежей
+### Поток пополнения баланса
 
 ```mermaid
-flowchart TD
-    A[👤 Пользователь инициирует платеж] --> B[🛒 Purchase Handler]
-    B --> C[💳 Payment Service]
-    C --> D[🗄️ Создание транзакции в БД]
-    D --> E[🏦 Запрос к Heleket API]
+sequenceDiagram
+    participant U as 👤 User
+    participant TB as 🤖 Telegram Bot
+    participant PS as 💳 Payment Service
+    participant H as 🏦 Heleket API
+    participant WH as 🔗 Webhook Handler
+    participant DB as 🗄️ Database
+    participant C as 📦 Cache
+
+    U->>TB: /recharge 100
+    TB->>PS: create_recharge_invoice(user_id, 100)
+    PS->>DB: create_transaction(pending)
+    PS->>H: POST /create_invoice
+    H-->>PS: invoice_url + uuid
+    PS->>C: cache_payment(uuid, user_id)
+    PS-->>TB: invoice_url
+    TB-->>U: 💳 Ссылка для оплаты
     
-    E --> F{📋 Ответ API}
-    F -->|✅ Успех| G[📦 Кеширование payment_uuid]
-    F -->|❌ Ошибка| H[⚠️ Error Handler]
+    Note over U,H: Пользователь оплачивает счет
     
-    G --> I[🔗 Отправка ссылки пользователю]
-    H --> J[📤 Сообщение об ошибке]
-    
-    I --> K[⏳ Ожидание webhook]
-    K --> L[🔗 Webhook получен]
-    L --> M[🔍 Валидация HMAC]
-    
-    M -->|❌ Невалидный| N[🚫 Отклонение webhook]
-    M -->|✅ Валидный| O[📊 Обновление транзакции]
-    
-    O --> P[💰 Обновление баланса]
-    P --> Q[📦 Очистка кеша]
-    Q --> R[📤 Уведомление пользователя]
-    
+    H->>WH: POST /webhook/heleket
+    WH->>C: get_payment_info(uuid)
+    WH->>DB: update_transaction(completed)
+    WH->>DB: update_user_balance(+100)
+    WH->>C: invalidate_user_cache(user_id)
+    WH->>TB: notify_payment_success(user_id)
+    TB->>U: ✅ Пополнение успешно! +100 💰
 ```
 
-## 🏛️ Слои архитектуры
+## 🛡️ Паттерны проектирования
 
-### Детальная схема слоев
+### Service Layer Pattern
+
+```python
+class StarPurchaseService(StarPurchaseServiceInterface):
+    """Сервис для управления покупкой звезд"""
+    
+    def __init__(self, user_repository, balance_repository, payment_service):
+        self.user_repository = user_repository
+        self.balance_repository = balance_repository
+        self.payment_service = payment_service
+        self.fragment_service = FragmentService()  # Новый сервис
+    
+    async def create_star_purchase(self, user_id, amount, purchase_type="balance"):
+        """Единая точка входа для всех типов покупок"""
+        if purchase_type == "balance":
+            return await self._create_star_purchase_with_balance(user_id, amount)
+        elif purchase_type == "payment":
+            return await self._create_star_purchase_with_payment(user_id, amount)
+        elif purchase_type == "fragment":
+            return await self._create_star_purchase_with_fragment(user_id, amount)
+```
+
+### Repository Pattern
+
+```python
+class UserRepository:
+    """Репозиторий для работы с пользователями"""
+    
+    async def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Получение пользователя по ID с кешированием"""
+        # Попытка получить из кеша
+        if self.user_cache:
+            cached_user = await self.user_cache.get_user(user_id)
+            if cached_user:
+                return cached_user
+        
+        # Получение из базы данных
+        query = select(User).where(User.user_id == user_id)
+        result = await self.session.execute(query)
+        user = result.scalar_one_or_none()
+        
+        if user and self.user_cache:
+            # Сохранение в кеш
+            await self.user_cache.cache_user(user_id, user.to_dict())
+        
+        return user.to_dict() if user else None
+```
+
+### Circuit Breaker Pattern
+
+```python
+class CircuitBreaker:
+    """Circuit Breaker для внешних API"""
+    
+    def __init__(self, failure_threshold=5, timeout=60):
+        self.failure_threshold = failure_threshold
+        self.timeout = timeout
+        self.failure_count = 0
+        self.last_failure_time = None
+        self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
+    
+    async def call(self, func, *args, **kwargs):
+        """Вызов функции с Circuit Breaker"""
+        if self.state == "OPEN":
+            if time.time() - self.last_failure_time > self.timeout:
+                self.state = "HALF_OPEN"
+            else:
+                raise CircuitBreakerOpenException("Circuit breaker is open")
+        
+        try:
+            result = await func(*args, **kwargs)
+            self._on_success()
+            return result
+        except Exception as e:
+            self._on_failure()
+            raise e
+```
+
+### Rate Limiting Pattern
+
+```python
+class RateLimitService:
+    """Сервис для ограничения частоты запросов"""
+    
+    async def check_rate_limit(self, key: str, limit: int, window: int) -> bool:
+        """Проверка лимита запросов для ключа"""
+        current_time = int(time.time())
+        window_key = f"rate_limit:{key}:{current_time // window}"
+        
+        # Получение текущего счетчика
+        current_count = await self.redis_client.get(window_key)
+        if current_count is None:
+            # Установка нового счетчика с TTL
+            await self.redis_client.setex(window_key, window, 1)
+            return True
+        
+        current_count = int(current_count)
+        if current_count >= limit:
+            return False
+        
+        # Увеличение счетчика
+        await self.redis_client.incr(window_key)
+        return True
+```
+
+## 📈 Масштабируемость
+
+### Горизонтальное масштабирование
 
 ```mermaid
 graph TB
-    subgraph "🌐 Presentation Layer"
-        TG[Telegram Interface]
-        WEB[Web Interface]
-        API[REST API]
-    end
-    
-    subgraph "🎯 Handler Layer"
-        MH[Message Handler]
-        PH[Payment Handler]
-        BH[Balance Handler]
-        EH[Error Handler]
-    end
-    
-    subgraph "⚙️ Service Layer"
-        PS[Payment Service]
-        BS[Balance Service]
-        CS[Cache Service]
-        RL[Rate Limiter]
-        HS[Health Service]
-    end
-    
-    subgraph "📊 Repository Layer"
-        UR[User Repository]
-        BR[Balance Repository]
-        TR[Transaction Repository]
-    end
-    
-    subgraph "🗄️ Data Layer"
-        PG[(PostgreSQL)]
-        RD[(Redis Cluster)]
-    end
-    
-    subgraph "🔧 Infrastructure Layer"
-        NG[Nginx]
-        DC[Docker]
-        PR[Prometheus]
-    end
-    
-    %% Connections
-    TG --> MH
-    WEB --> PH
-    API --> BH
-    
-    MH --> PS
-    PH --> PS
-    BH --> BS
-    
-    PS --> UR
-    PS --> TR
-    BS --> BR
-    
-    UR --> PG
-    BR --> PG
-    TR --> PG
-    
-    CS --> RD
-    RL --> RD
-    
-    NG --> TG
-    NG --> WEB
-    NG --> API
-    
-```
-
-## 🔄 Паттерны проектирования
-
-### Используемые паттерны
-
-```mermaid
-mindmap
-  root((Design Patterns))
-    Repository Pattern
-      User Repository
-      Balance Repository
-      Transaction Repository
-    Service Layer Pattern
-      Payment Service
-      Balance Service
-      Cache Service
-    Factory Pattern
-      Handler Factory
-      Service Factory
-    Observer Pattern
-      Webhook Events
-      Payment Events
-    Strategy Pattern
-      Rate Limiting Strategies
-      Cache Strategies
-    Circuit Breaker
-      External API Calls
-      Database Connections
-    Dependency Injection
-      Service Dependencies
-      Repository Dependencies
-```
-
-## 📈 Масштабирование
-
-### Стратегия горизонтального масштабирования
-
-```mermaid
-graph TB
-    subgraph "Load Balancer Layer"
+    subgraph "Load Balancer"
         LB[Nginx Load Balancer]
     end
     
-    subgraph "Application Layer"
-        APP1[Bot Instance 1]
-        APP2[Bot Instance 2]
-        APP3[Bot Instance N]
-        
-        WH1[Webhook Instance 1]
-        WH2[Webhook Instance 2]
-    end
-    
-    subgraph "Cache Layer"
-        RC1[Redis Node 1]
-        RC2[Redis Node 2]
-        RC3[Redis Node 3]
-        RR1[Redis Replica 1]
-        RR2[Redis Replica 2]
-        RR3[Redis Replica 3]
+    subgraph "Application Cluster"
+        APP1[App Instance 1]
+        APP2[App Instance 2]
+        APP3[App Instance 3]
     end
     
     subgraph "Database Layer"
-        PG_MASTER[(PostgreSQL Master)]
-        PG_SLAVE1[(PostgreSQL Slave 1)]
-        PG_SLAVE2[(PostgreSQL Slave 2)]
+        PG_PRIMARY[PostgreSQL Primary]
+        PG_REPLICA1[Replica 1]
+        PG_REPLICA2[Replica 2]
+    end
+    
+    subgraph "Cache Cluster"
+        REDIS_CLUSTER[Redis Cluster]
     end
     
     LB --> APP1
     LB --> APP2
     LB --> APP3
-    LB --> WH1
-    LB --> WH2
     
-    APP1 --> RC1
-    APP2 --> RC2
-    APP3 --> RC3
+    APP1 --> PG_PRIMARY
+    APP2 --> PG_REPLICA1
+    APP3 --> PG_REPLICA2
     
-    WH1 --> RC1
-    WH2 --> RC2
+    APP1 --> REDIS_CLUSTER
+    APP2 --> REDIS_CLUSTER
+    APP3 --> REDIS_CLUSTER
     
-    APP1 --> PG_MASTER
-    APP2 --> PG_MASTER
-    APP3 --> PG_MASTER
-    
-    WH1 --> PG_MASTER
-    WH2 --> PG_MASTER
-    
-    PG_MASTER --> PG_SLAVE1
-    PG_MASTER --> PG_SLAVE2
-    
-    RC1 -.-> RR1
-    RC2 -.-> RR2
-    RC3 -.-> RR3
-    
+    PG_PRIMARY -.-> PG_REPLICA1
+    PG_PRIMARY -.-> PG_REPLICA2
 ```
 
-## 🔐 Безопасность
-
-### Схема безопасности
-
-```mermaid
-graph TD
-    subgraph "🛡️ Security Layers"
-        SSL[SSL/TLS Encryption]
-        HMAC[HMAC Signature Validation]
-        RATE[Rate Limiting]
-        VALID[Input Validation]
-        AUTH[Authentication]
-    end
-    
-    subgraph "🔒 Data Protection"
-        ENV[Environment Variables]
-        HASH[Password Hashing]
-        ENCRYPT[Data Encryption]
-    end
-    
-    subgraph "🚨 Monitoring"
-        LOG[Security Logging]
-        ALERT[Alert System]
-        AUDIT[Audit Trail]
-    end
-    
-    SSL --> HMAC
-    HMAC --> RATE
-    RATE --> VALID
-    VALID --> AUTH
-    
-    AUTH --> ENV
-    ENV --> HASH
-    HASH --> ENCRYPT
-    
-    ENCRYPT --> LOG
-    LOG --> ALERT
-    ALERT --> AUDIT
-    
-```
-
-## 📊 Мониторинг и метрики
-
-### Архитектура мониторинга
+### Вертикальное масштабирование
 
 ```mermaid
 graph TB
-    subgraph "📱 Application"
-        BOT[Telegram Bot]
-        WEB[Webhook Service]
-        API[REST API]
+    subgraph "Enhanced Single Instance"
+        APP[Enhanced App]
+        subgraph "Connection Pooling"
+            DB_POOL[Database Pool]
+            CACHE_POOL[Cache Pool]
+        end
+        subgraph "Async Processing"
+            TASK_QUEUE[Task Queue]
+            WORKER_POOL[Worker Pool]
+        end
     end
     
-    subgraph "📊 Metrics Collection"
-        PROM[Prometheus]
-        GRAF[Grafana]
-        ALERT[AlertManager]
-    end
-    
-    subgraph "📝 Logging"
-        LOGS[Application Logs]
-        ELK[ELK Stack]
-        FLUENT[Fluentd]
-    end
-    
-    subgraph "🔍 Health Checks"
-        HEALTH[Health Endpoints]
-        UPTIME[Uptime Monitoring]
-        PERF[Performance Monitoring]
-    end
-    
-    BOT --> PROM
-    WEB --> PROM
-    API --> PROM
-    
-    BOT --> LOGS
-    WEB --> LOGS
-    API --> LOGS
-    
-    PROM --> GRAF
-    PROM --> ALERT
-    
-    LOGS --> FLUENT
-    FLUENT --> ELK
-    
-    HEALTH --> UPTIME
-    UPTIME --> PERF
-    
-    GRAF --> ALERT
-    ELK --> ALERT
-    PERF --> ALERT
-    
+    APP --> DB_POOL
+    APP --> CACHE_POOL
+    APP --> TASK_QUEUE
+    TASK_QUEUE --> WORKER_POOL
 ```
 
----
+### Auto Scaling
 
-**Документация создана для обеспечения понимания архитектуры системы всеми участниками команды разработки.**
+```yaml
+# docker-compose.scale.yml
+version: '3.8'
+services:
+  app:
+    image: telegram-bot:latest
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+    environment:
+      - REDIS_URL=redis://redis-cluster:7000
+      - DATABASE_URL=postgresql://user:pass@postgres-primary:5432/db
+
+  redis-cluster:
+    image: redis:7-alpine
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 256M
+```

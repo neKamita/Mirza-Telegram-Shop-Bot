@@ -151,6 +151,10 @@ class Settings:
         # Nginx/Proxy
         self.proxy_url: str = os.getenv("PROXY_URL", "")
 
+        # Fragment API Configuration
+        self.fragment_seed_phrase: str = os.getenv("FRAGMENT_SEED_PHRASE", "")
+        self.fragment_cookies: str = os.getenv("FRAGMENT_COOKIES", "")
+
         # Application
         self.debug: bool = os.getenv("DEBUG", "False").lower() == "true"
         self.log_level: str = os.getenv("LOG_LEVEL", "INFO")

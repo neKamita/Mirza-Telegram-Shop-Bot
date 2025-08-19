@@ -17,6 +17,7 @@ from repositories.user_repository import TransactionType, TransactionStatus
 from services.payment_service import PaymentService
 from services.payment_cache import PaymentCache
 from services.user_cache import UserCache
+from services.fragment_service import FragmentService
 
 
 class StarPurchaseService(StarPurchaseServiceInterface):
@@ -30,10 +31,11 @@ class StarPurchaseService(StarPurchaseServiceInterface):
         self.payment_service = payment_service
         self.payment_cache = payment_cache
         self.user_cache = user_cache
+        self.fragment_service = FragmentService()
         self.logger = logging.getLogger(__name__)
 
     async def create_star_purchase(self, user_id: int, amount: int, purchase_type: str = "balance") -> Dict[str, Any]:
-        """Создание покупки звезд с баланса пользователя или через платежную систему"""
+        """Создание покупки звезд с баланса пользователя, через платежную систему или через Fragment API"""
         try:
             # Валидация суммы
             if not await self._validate_purchase_amount(amount):
@@ -46,6 +48,10 @@ class StarPurchaseService(StarPurchaseServiceInterface):
             # Если покупка с баланса, проверяем баланс и списываем средства
             if purchase_type == "balance":
                 return await self._create_star_purchase_with_balance(user_id, amount)
+
+            # Если покупка через Fragment API
+            if purchase_type == "fragment":
+                return await self._create_star_purchase_with_fragment(user_id, amount)
 
             # Иначе создаем покупку через платежную систему (Heleket)
             return await self._create_star_purchase_with_payment(user_id, amount)
@@ -176,6 +182,135 @@ class StarPurchaseService(StarPurchaseServiceInterface):
 
         except Exception as e:
             self.logger.error(f"Error creating star purchase with balance for user {user_id}: {e}")
+            return {
+                "status": "failed",
+                "error": str(e)
+            }
+
+    async def _create_star_purchase_with_fragment(self, user_id: int, amount: int) -> Dict[str, Any]:
+        """Покупка звезд через Telegram Fragment API"""
+        try:
+            # Получаем информацию о пользователе из базы данных
+            user_data = await self.user_repository.get_user_by_id(user_id)
+            if not user_data:
+                return {
+                    "status": "failed",
+                    "error": "User not found"
+                }
+
+            # Получаем Telegram username пользователя
+            telegram_username = user_data.get("telegram_username")
+            if not telegram_username:
+                return {
+                    "status": "failed",
+                    "error": "Telegram username not found for user"
+                }
+
+            # Создаем транзакцию в ожидании покупки
+            transaction_id = await self.balance_repository.create_transaction(
+                user_id=user_id,
+                transaction_type=TransactionType.PURCHASE,
+                amount=float(amount),
+                description=f"Покупка {amount} звезд через Fragment API",
+                external_id=f"fragment_purchase_{user_id}_{int(time.time())}",
+                metadata={
+                    "stars_count": amount,
+                    "purchase_type": "fragment",
+                    "created_at": datetime.utcnow().isoformat()
+                }
+            )
+
+            if not transaction_id:
+                return {
+                    "status": "failed",
+                    "error": "Failed to create transaction"
+                }
+
+            # Кешируем информацию о покупке
+            if self.payment_cache:
+                await self.payment_cache.cache_payment_details(
+                    f"fragment_purchase_{user_id}_{amount}",
+                    {
+                        "user_id": user_id,
+                        "amount": amount,
+                        "transaction_id": transaction_id,
+                        "status": "pending",
+                        "created_at": datetime.utcnow().isoformat()
+                    }
+                )
+
+            # Выполняем покупку звезд через Fragment API
+            purchase_result = await self.fragment_service.buy_stars_without_kyc(
+                username=telegram_username,
+                amount=amount
+            )
+
+            # Если покупка не удалась из-за cookies, пытаемся обновить их и повторить
+            if purchase_result["status"] == "failed":
+                error_msg = purchase_result.get("error", "Unknown error")
+                # Проверяем, может быть ошибка связана с cookies
+                if "cookie" in error_msg.lower() or "auth" in error_msg.lower() or "unauthorized" in error_msg.lower():
+                    self.logger.warning(f"Fragment API call failed with auth error, trying to refresh cookies: {error_msg}")
+                    
+                    # Пытаемся обновить cookies
+                    if await self.fragment_service.refresh_cookies_if_needed():
+                        # Повторяем покупку с новыми cookies
+                        self.logger.info("Retrying Fragment API call with refreshed cookies")
+                        purchase_result = await self.fragment_service.buy_stars_without_kyc(
+                            username=telegram_username,
+                            amount=amount
+                        )
+
+            # Проверяем результат после возможного повтора
+            if purchase_result["status"] == "failed":
+                error_msg = purchase_result.get("error", "Unknown error")
+                # Отменяем транзакцию в случае ошибки
+                await self.balance_repository.update_transaction_status(
+                    transaction_id,
+                    TransactionStatus.FAILED,
+                    metadata={"error": error_msg, "failed_at": datetime.utcnow().isoformat()}
+                )
+                return {
+                    "status": "failed",
+                    "error": error_msg,
+                    "transaction_id": transaction_id
+                }
+
+            # Обновляем транзакцию с данными покупки
+            await self.balance_repository.update_transaction_status(
+                transaction_id,
+                TransactionStatus.COMPLETED,
+                metadata={
+                    "purchase_completed_at": datetime.utcnow().isoformat(),
+                    "fragment_result": purchase_result.get("result", {}),
+                    "purchase_type": "fragment"
+                }
+            )
+
+            # Кешируем результат
+            if self.payment_cache:
+                await self.payment_cache.cache_payment_details(
+                    f"fragment_purchase_{user_id}_{amount}",
+                    {
+                        "user_id": user_id,
+                        "amount": amount,
+                        "transaction_id": transaction_id,
+                        "status": "completed",
+                        "fragment_result": purchase_result.get("result", {}),
+                        "completed_at": datetime.utcnow().isoformat()
+                    }
+                )
+
+            return {
+                "status": "success",
+                "purchase_type": "fragment",
+                "result": purchase_result.get("result", {}),
+                "transaction_id": transaction_id,
+                "stars_count": amount
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error creating star purchase with Fragment API for user {user_id}: {e}")
             return {
                 "status": "failed",
                 "error": str(e)

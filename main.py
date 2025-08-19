@@ -120,6 +120,30 @@ async def main():
     )
 
     logging.info("Starting application initialization...")
+    
+    # Предварительная проверка Fragment API настроек
+    try:
+        from services.fragment_service import FragmentService
+        
+        # Проверяем формат seed phrase
+        fragment_service = FragmentService()
+        if not fragment_service._validate_seed_phrase():
+            logging.error("Fragment API seed phrase validation failed. Application will continue but Fragment features may not work.")
+        else:
+            logging.info("Fragment API seed phrase validation passed")
+            
+        # Инициализация cookies если включена автоматическая настройка
+        from services.fragment_cookie_manager import initialize_fragment_cookies
+        await initialize_fragment_cookies(fragment_service)
+        
+        ping_result = await fragment_service.ping()
+        if ping_result["status"] == "success":
+            logging.info("Fragment API is available")
+        else:
+            logging.warning(f"Fragment API is not available: {ping_result.get('error', 'Unknown error')}")
+    except Exception as e:
+        logging.error(f"Error initializing Fragment API: {e}")
+        logging.warning("Fragment API features may not be available")
 
     # Инициализация сервисов кэширования
     cache_services = await init_cache_services()

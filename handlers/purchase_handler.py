@@ -48,7 +48,7 @@ class PurchaseHandler(BaseHandler):
         Args:
             callback: Callback запрос
             bot: Экземпляр бота
-            payment_type: Тип оплаты ("card" или "balance")
+            payment_type: Тип оплаты ("card", "balance" или "fragment")
         """
         builder = InlineKeyboardBuilder()
         
@@ -64,7 +64,7 @@ class PurchaseHandler(BaseHandler):
             )
             title = "💳 <b>Покупка звезд картой/кошельком</b> 💳"
             description = "🔗 <i>Оплата через платежную систему Heleket</i>"
-        else:
+        elif payment_type == "balance":
             # Меню для оплаты с баланса
             builder.row(
                 InlineKeyboardButton(text="⭐ 100 звезд", callback_data="buy_100_balance"),
@@ -76,6 +76,18 @@ class PurchaseHandler(BaseHandler):
             )
             title = "💰 <b>Покупка звезд с баланса</b> 💰"
             description = "💸 <i>Списание с вашего внутреннего баланса</i>"
+        else:
+            # Меню для оплаты через Fragment API
+            builder.row(
+                InlineKeyboardButton(text="⭐ 100 звезд", callback_data="buy_100_fragment"),
+                InlineKeyboardButton(text="⭐ 250 звезд", callback_data="buy_250_fragment")
+            )
+            builder.row(
+                InlineKeyboardButton(text="⭐ 500 звезд", callback_data="buy_500_fragment"),
+                InlineKeyboardButton(text="⭐ 1000 звезд", callback_data="buy_1000_fragment")
+            )
+            title = "💎 <b>Покупка звезд через Fragment</b> 💎"
+            description = "🚀 <i>Прямая покупка через Telegram Fragment API</i>"
         
         builder.row(
             InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
@@ -393,6 +405,29 @@ class PurchaseHandler(BaseHandler):
             amount=amount
         )
 
+    async def buy_stars_with_fragment(self, message_or_callback: Union[Message, CallbackQuery], bot: Bot, amount: int) -> None:
+        """
+        Покупка звезд через Fragment API с использованием safe_execute
+        
+        Args:
+            message_or_callback: Сообщение или callback запрос
+            bot: Экземпляр бота
+            amount: Количество звезд для покупки
+        """
+        if isinstance(message_or_callback, CallbackQuery):
+            user_id = message_or_callback.from_user.id
+        else:
+            user_id = message_or_callback.from_user.id
+            
+        await self.safe_execute(
+            user_id=user_id,
+            operation="buy_stars_with_fragment",
+            func=self._buy_stars_with_fragment_impl,
+            message_or_callback=message_or_callback,
+            bot=bot,
+            amount=amount
+        )
+
     async def _buy_stars_with_balance_impl(self, message_or_callback: Union[Message, CallbackQuery], bot: Bot, amount: int) -> None:
         """
         Реализация покупки звезд с баланса пользователя
@@ -502,6 +537,101 @@ class PurchaseHandler(BaseHandler):
                 {"user_id": user_id, "amount": amount, "error": str(e)}
             )
 
+    async def _buy_stars_with_fragment_impl(self, message_or_callback: Union[Message, CallbackQuery], bot: Bot, amount: int) -> None:
+        """
+        Реализация покупки звезд через Fragment API
+        
+        Args:
+            message_or_callback: Сообщение или callback запрос
+            bot: Экземпляр бота
+            amount: Количество звезд для покупки
+        """
+        if not message_or_callback.from_user or not message_or_callback.from_user.id:
+            return
+
+        user_id = message_or_callback.from_user.id
+        is_callback = isinstance(message_or_callback, CallbackQuery)
+        message = message_or_callback.message if is_callback else message_or_callback
+
+        try:
+            # Показываем быстрый индикатор загрузки
+            if is_callback:
+                await message_or_callback.answer("⏳ Обрабатываем покупку через Fragment...", show_alert=False)
+            
+            # Используем новый сервис покупки звезд через Fragment API
+            purchase_result = await self.star_purchase_service.create_star_purchase(
+                user_id=user_id,
+                amount=amount,
+                purchase_type="fragment"
+            )
+
+            if purchase_result["status"] == "failed":
+                error_msg = purchase_result.get("error", "Неизвестная ошибка")
+                
+                # Используем ErrorHandler для обработки ошибки
+                error_type = await self.error_handler.handle_purchase_error(Exception(error_msg), {"user_id": user_id, "amount": amount})
+                
+                # Показываем ошибку с рекомендациями
+                await self.error_handler.show_error_with_suggestions(
+                    message_or_callback,
+                    error_type,
+                    {"user_id": user_id, "amount": amount}
+                )
+                return
+
+            # Показываем успешное сообщение
+            stars_count = purchase_result.get("stars_count", 0)
+            fragment_result = purchase_result.get("result", {})
+
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(text="📊 История покупок", callback_data="purchase_history"),
+                InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_buy_stars")
+            )
+
+            success_message = (
+                f"🎉 <b>Покупка через Fragment успешна!</b> 🎉\n\n"
+                f"⭐ <b>Куплено звезд:</b> {stars_count}\n"
+                f"🧾 <b>Статус:</b> {fragment_result.get('status', 'completed')}\n\n"
+                f"🌟 <i>Спасибо за покупку!</i> 🌟\n\n"
+                f"✨ Ваши звезды уже доступны для использования!"
+            )
+
+            if message:
+                try:
+                    if is_callback:
+                        await message.edit_text(
+                            success_message,
+                            reply_markup=builder.as_markup(),
+                            parse_mode="HTML"
+                        )
+                    else:
+                        await message.answer(
+                            success_message,
+                            reply_markup=builder.as_markup(),
+                            parse_mode="HTML"
+                        )
+                except Exception as e:
+                    self.logger.error(f"Error editing/answering message in buy_stars_with_fragment success case: {e}")
+                    await message.answer(
+                        success_message,
+                        reply_markup=builder.as_markup(),
+                        parse_mode="HTML"
+                    )
+
+        except Exception as e:
+            self.logger.error(f"Error creating star purchase with Fragment for user {user_id}: {e}")
+            
+            # Используем ErrorHandler для обработки ошибки
+            error_type = await self.error_handler.handle_purchase_error(e, {"user_id": user_id, "amount": amount})
+            
+            # Показываем ошибку с рекомендациями
+            await self.error_handler.show_error_with_suggestions(
+                message_or_callback,
+                error_type,
+                {"user_id": user_id, "amount": amount, "error": str(e)}
+            )
+
     async def handle_message(self, message: Message, bot: Bot) -> None:
         """
         Обработка текстовых сообщений (реализация абстрактного метода)
@@ -546,12 +676,18 @@ class PurchaseHandler(BaseHandler):
         elif callback.data == "buy_stars_balance":
             # Показать меню покупок с баланса
             await self._show_buy_stars_menu(callback, bot, payment_type="balance")
+        elif callback.data == "buy_stars_fragment":
+            # Показать меню покупок через Fragment API
+            await self._show_buy_stars_menu(callback, bot, payment_type="fragment")
         elif callback.data in ["buy_100", "buy_250", "buy_500", "buy_1000"]:
             amount = int(callback.data.replace("buy_", ""))
             await self.buy_stars_preset(callback, bot, amount)
         elif callback.data in ["buy_100_balance", "buy_250_balance", "buy_500_balance", "buy_1000_balance"]:
             amount = int(callback.data.replace("buy_", "").replace("_balance", ""))
             await self.buy_stars_with_balance(callback, bot, amount)
+        elif callback.data in ["buy_100_fragment", "buy_250_fragment", "buy_500_fragment", "buy_1000_fragment"]:
+            amount = int(callback.data.replace("buy_", "").replace("_fragment", ""))
+            await self.buy_stars_with_fragment(callback, bot, amount)
         elif callback.data.startswith("check_payment_"):
             payment_id = callback.data.replace("check_payment_", "")
             # Здесь может быть вызов метода проверки статуса платежа
@@ -563,11 +699,14 @@ class PurchaseHandler(BaseHandler):
                 "⭐ <b>Покупка звезд</b> ⭐\n\n"
                 "🎯 <i>Выберите способ оплаты:</i>\n\n"
                 f"💳 <i>Картой/Кошельком - оплата через Heleket</i>\n"
-                f"💰 <i>С баланса - списание со счета</i>\n\n"
+                f"💰 <i>С баланса - списание со счета</i>\n"
+                f"💎 <i>Через Fragment - прямая покупка</i>\n\n"
                 f"✨ <i>Каждая звезда имеет ценность!</i>",
                 reply_markup=InlineKeyboardBuilder().row(
                     InlineKeyboardButton(text="💳 Картой/Кошельком", callback_data="buy_stars"),
                     InlineKeyboardButton(text="💰 С баланса", callback_data="buy_stars_balance")
+                ).row(
+                    InlineKeyboardButton(text="💎 Через Fragment", callback_data="buy_stars_fragment")
                 ).row(
                     InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
                 ).as_markup(),
