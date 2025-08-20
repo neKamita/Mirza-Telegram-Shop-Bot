@@ -23,15 +23,32 @@ class Settings:
             database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
         # Обработка SSL параметров для asyncpg
-        if "localhost" in database_url or "127.0.0.1" in database_url:
-            # Убираем sslmode для локальной разработки
-            database_url = database_url.replace("?sslmode=require", "")
-            database_url = database_url.replace("&sslmode=require", "")
-            database_url = database_url.replace("sslmode=require", "")
-        else:
-            # Для production (Neon) используем ssl=true вместо sslmode
-            if "sslmode=require" in database_url:
-                database_url = database_url.replace("sslmode=require", "ssl=true")
+        # Извлекаем sslmode из URL и сохраняем отдельно
+        self.ssl_mode = None
+        if "sslmode=" in database_url:
+            # Находим значение sslmode
+            import re
+            match = re.search(r'sslmode=([^&]*)', database_url)
+            if match:
+                self.ssl_mode = match.group(1)
+                # Убираем sslmode из URL
+                database_url = re.sub(r'[?&]sslmode=[^&]*', '', database_url)
+                # Убираем лишний & или ? если он остался в конце
+                database_url = re.sub(r'[?&]$', '', database_url)
+
+        # Обработка channel_binding параметра для asyncpg
+        # Извлекаем channel_binding из URL и сохраняем отдельно
+        self.channel_binding = None
+        if "channel_binding=" in database_url:
+            # Находим значение channel_binding
+            import re
+            match = re.search(r'channel_binding=([^&]*)', database_url)
+            if match:
+                self.channel_binding = match.group(1)
+                # Убираем channel_binding из URL
+                database_url = re.sub(r'[?&]channel_binding=[^&]*', '', database_url)
+                # Убираем лишний & или ? если он остался в конце
+                database_url = re.sub(r'[?&]$', '', database_url)
 
         self.database_url: str = database_url
         self.database_pool_size: int = int(os.getenv("DATABASE_POOL_SIZE", "10"))

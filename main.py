@@ -69,7 +69,6 @@ async def init_cache_services():
 
             # Проверка подключения
             logging.info(f"Redis client type: {type(redis_client)}")
-            logging.info(f"Redis client attributes: {[attr for attr in dir(redis_client) if not attr.startswith('_')]}")
 
             if hasattr(redis_client, 'ping'):
                 if asyncio.iscoroutinefunction(redis_client.ping):

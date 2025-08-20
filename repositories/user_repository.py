@@ -13,6 +13,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from enum import Enum as PyEnum
+from config.settings import settings
 from services.user_cache import UserCache
 
 
@@ -97,11 +98,26 @@ class UserRepository(DatabaseInterface):
         self.database_url = database_url
         self.user_cache = user_cache
         self.logger = logging.getLogger(__name__)
+
+        # Создаем движок с правильными параметрами для asyncpg
+        connect_args = {}
+
+        # Добавляем SSL параметры если они есть
+        if hasattr(settings, 'ssl_mode') and settings.ssl_mode:
+            connect_args['ssl'] = settings.ssl_mode
+
+        # Добавляем channel_binding если он есть
+        if hasattr(settings, 'channel_binding') and settings.channel_binding:
+            if 'server_settings' not in connect_args:
+                connect_args['server_settings'] = {}
+            connect_args['server_settings']['channel_binding'] = settings.channel_binding
+
         self.engine = create_async_engine(
             database_url,
             pool_size=10,
             max_overflow=20,
-            pool_pre_ping=True
+            pool_pre_ping=True,
+            connect_args=connect_args
         )
         self.async_session = sessionmaker(
             self.engine,
