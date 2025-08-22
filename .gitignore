@@ -176,3 +176,6 @@ REDIS_PORTS_CHANGE_INSTRUCTIONS.md
 .kilocode/rules/byterover-rules.md
 .agent.md
 QWEN.md
+.clinerules/byterover-rules.md
+.github/copilot-instructions.md
+.roo/rules/byterover-rules.md
