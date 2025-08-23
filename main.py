@@ -7,6 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.methods import DeleteWebhook
 
 from config.settings import settings
+from services.webhook_app import app as webhook_app
 from repositories.user_repository import UserRepository
 from repositories.balance_repository import BalanceRepository
 from services.payment_service import PaymentService
@@ -110,6 +111,30 @@ async def init_cache_services():
     return cache_services
 
 
+async def run_webhook_server():
+    """Запуск FastAPI сервера для обработки webhook"""
+    import uvicorn
+    from services.webhook_app import app as webhook_app
+    from config.settings import settings
+
+    config = uvicorn.Config(
+        app=webhook_app,
+        host=settings.webhook_host,
+        port=settings.webhook_port,
+        reload=settings.debug,
+        log_level=settings.log_level.lower()
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
+async def run_telegram_bot(bot, dp):
+    """Запуск Telegram бота"""
+    await bot(DeleteWebhook(drop_pending_updates=True))
+    logging.info("Starting Telegram bot polling...")
+    await dp.start_polling(bot)
+
+
 async def main():
     """Основная функция приложения"""
     # Настройка логирования
@@ -119,10 +144,14 @@ async def main():
     )
 
     logging.info("Starting application initialization...")
-    
+    logging.info(f"Production domain configured: {settings.production_domain}")
+    logging.info(f"Webhook host: {settings.webhook_host}:{settings.webhook_port}")
+    logging.info(f"Environment: {settings.environment}")
+    logging.info(f"Debug mode: {settings.debug}")
+
     # Предварительная проверка Fragment API настроек
     try:
-        from services.fragment_service import FragmentService
+        from services.fragment_service import FragmentService</search>
         
         # Проверяем формат seed phrase
         fragment_service = FragmentService()
@@ -211,15 +240,24 @@ async def main():
     await init_database()
     logging.info("Database initialized successfully")
 
-    # Запуск вебхука для платежей
+    # Запуск сервисов параллельно
     if settings.balance_service_enabled and settings.webhook_enabled:
         logging.info(f"Starting webhook server on {settings.webhook_host}:{settings.webhook_port}")
-        # Здесь будет запуск вебхука
+        logging.info(f"Webhook endpoint: https://{settings.production_domain}/webhook/heleket")
+        logging.info(f"Health check endpoint: https://{settings.production_domain}/health")
+        logging.info(f"Detailed health check: https://{settings.production_domain}/health/detailed")
+        logging.info(f"Metrics endpoint: https://{settings.production_domain}/metrics")
 
-    # Запуск бота
-    await bot(DeleteWebhook(drop_pending_updates=True))
-    logging.info("Starting Telegram bot polling...")
-    await dp.start_polling(bot)
+        # Запуск webhook сервера и Telegram бота параллельно
+        await asyncio.gather(
+            run_webhook_server(),
+            run_telegram_bot(bot, dp)
+        )</search>
+    else:
+        # Запуск только Telegram бота
+        await bot(DeleteWebhook(drop_pending_updates=True))
+        logging.info("Starting Telegram bot polling...")
+        await dp.start_polling(bot)
 
 
 if __name__ == "__main__":

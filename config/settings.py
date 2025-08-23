@@ -129,6 +129,16 @@ class Settings:
         self.webhook_port: int = int(os.getenv("WEBHOOK_PORT", "8001"))
         self.webhook_enabled: bool = os.getenv("WEBHOOK_ENABLED", "True").lower() == "true"
 
+        # Production Domain Configuration
+        self.production_domain: str = os.getenv("PRODUCTION_DOMAIN", "")
+        self.cloudflare_tunnel_url: str = os.getenv("CLOUDFLARE_TUNNEL_URL", "")
+        self.enable_https_redirect: bool = os.getenv("ENABLE_HTTPS_REDIRECT", "True").lower() == "true"
+
+        # Domain-specific logging configuration
+        self.domain_debug_logging: bool = os.getenv("DOMAIN_DEBUG_LOGGING", "False").lower() == "true"
+        self.webhook_domain_logging: bool = os.getenv("WEBHOOK_DOMAIN_LOGGING", "False").lower() == "true"
+        self.log_request_headers: bool = os.getenv("LOG_REQUEST_HEADERS", "False").lower() == "true"
+
         # Cache Configuration
         self.cache_ttl_user: int = int(os.getenv("CACHE_TTL_USER", "1800"))
         self.cache_ttl_session: int = int(os.getenv("CACHE_TTL_SESSION", "1800"))

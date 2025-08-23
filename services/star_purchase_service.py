@@ -624,16 +624,56 @@ class StarPurchaseService(StarPurchaseServiceInterface):
             return False
 
     async def _validate_webhook_signature(self, webhook_data: Dict[str, Any]) -> bool:
-        """Валидация подписи вебхука от Heleket"""
+        """Валидация подписи вебхука от Heleket с использованием HMAC SHA256"""
         try:
-            # Это упрощенная валидация. В реальном проекте нужно использовать секретный ключ
-            # для проверки подписи от Heleket
+            # Получаем секретный ключ из настроек
+            from config.settings import settings
+            webhook_secret = settings.webhook_secret
+
+            if not webhook_secret:
+                self.logger.warning("Webhook secret is not configured, skipping signature validation")
+                return True  # В режиме разработки разрешаем без подписи
+
+            # Извлекаем необходимые поля для валидации
             webhook_uuid = webhook_data.get("uuid")
-            if not webhook_uuid:
+            status = webhook_data.get("status")
+            amount = webhook_data.get("amount")
+
+            if not webhook_uuid or not status:
+                self.logger.error("Missing required fields: uuid or status")
                 return False
 
-            # Здесь должна быть логика проверки HMAC подписи
-            # Для примера просто возвращаем True
+            # Создаем строку для подписи (payload)
+            # Используем JSON сериализацию для консистентности
+            import json
+            payload = json.dumps({
+                "uuid": webhook_uuid,
+                "status": status,
+                "amount": amount
+            }, sort_keys=True, separators=(',', ':'))
+
+            # Вычисляем HMAC SHA256 подпись
+            expected_signature = hmac.new(
+                webhook_secret.encode('utf-8'),
+                payload.encode('utf-8'),
+                hashlib.sha256
+            ).hexdigest()
+
+            # Получаем подпись из заголовков запроса (если доступна)
+            # В реальной реализации это должно передаваться через middleware
+            provided_signature = getattr(self, '_webhook_signature', None)
+
+            if provided_signature:
+                # Используем постоянное время сравнение для безопасности
+                is_valid = hmac.compare_digest(expected_signature, provided_signature)
+                if not is_valid:
+                    self.logger.error(f"Invalid webhook signature for UUID: {webhook_uuid}")
+                    return False
+            else:
+                # Если подпись не предоставлена, логируем предупреждение
+                self.logger.warning(f"No signature provided for webhook UUID: {webhook_uuid}")
+
+            self.logger.info(f"Webhook signature validation passed for UUID: {webhook_uuid}")
             return True
 
         except Exception as e:

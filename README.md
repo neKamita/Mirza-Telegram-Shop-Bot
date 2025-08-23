@@ -23,6 +23,7 @@
 ## 📚 Дополнительная документация
 
 - [🏗️ Детальная архитектура](docs/ARCHITECTURE.md) - Подробные диаграммы компонентов и паттернов
+- [☁️ Cloudflare Настройка](CLOUDFLARE_SETUP.md) - Подробная настройка Cloudflare Tunnel
 - [🚀 Развертывание и DevOps](docs/DEPLOYMENT.md) - CI/CD, Docker, инфраструктура
 - [💎 Fragment API](docs/fragment.md) - Интеграция с Telegram Fragment для покупки звезд
 
@@ -306,6 +307,7 @@ graph LR
 | **Nginx** | latest | Reverse proxy и load balancer |
 | **Docker** | latest | Контейнеризация |
 | **Docker Compose** | latest | Оркестрация сервисов |
+| **Cloudflare Tunnel** | latest | Безопасный туннель для доступа к сервисам |
 
 ### Мониторинг и безопасность
 
@@ -468,6 +470,170 @@ python scripts/check_fragment_status.py
 
 # Или через docker-compose
 docker-compose exec app python scripts/check_fragment_status.py
+```
+
+## ☁️ Cloudflare Настройка
+
+### Обзор
+
+Cloudflare используется для создания безопасного туннеля к вашему боту, обеспечивая SSL/TLS шифрование и CDN.
+
+### Требуемые разрешения
+
+Для создания туннеля и API ключей требуются следующие разрешения в Cloudflare:
+
+1. **API Token с правами:**
+   - `Zone:Zone:Read` - чтение зон
+   - `Zone:DNS:Edit` - управление DNS записями
+   - `Tunnel:Create` - создание туннелей
+   - `Tunnel:Read` - чтение конфигурации туннелей
+   - `Tunnel:Edit` - редактирование туннелей
+
+2. **Account Token для cloudflared credentials:**
+   - `Account:Cloudflare Tunnel:Edit` - управление туннелями на уровне аккаунта
+   - `Account:Zone:Read` - чтение зон на уровне аккаунта
+
+### Получение API ключей
+
+#### 1. API Token для Zone Management
+
+1. Зайдите в [Cloudflare Dashboard](https://dash.cloudflare.com)
+2. Перейдите в раздел "API Tokens" → "Tokens"
+3. Нажмите "Create token"
+4. Выберите "Template: Edit zone DNS"
+5. Настройте токен:
+   - Zone Resources: выберите нужную зону
+   - Permissions: `Zone:DNS:Edit`
+6. Создайте токен и сохраните его
+
+#### 2. Account Token для Tunnel Creation
+
+1. В том же разделе "API Tokens"
+2. Нажмите "Create token"
+3. Выберите "Custom token"
+4. Настройте токен:
+   - Account Resources: ваш аккаунт
+   - Permissions:
+     - `Account:Cloudflare Tunnel:Edit`
+     - `Account:Zone:Read`
+5. Создайте токен и сохраните его
+
+### Настройка Tunnel
+
+#### 1. Установка cloudflared
+
+```bash
+# macOS
+brew install cloudflare/cloudflare/cloudflared
+
+# Linux (Debian/Ubuntu)
+sudo apt install cloudflared
+
+# Или через Docker
+docker pull cloudflare/cloudflared:latest
+```
+
+#### 2. Создание туннеля
+
+```bash
+# Войдите в Cloudflare
+cloudflared tunnel login
+
+# Создайте туннель
+cloudflared tunnel create telegram-bot-tunnel
+
+# Настройте DNS запись
+cloudflared tunnel route dns telegram-bot-tunnel your-domain.com
+```
+
+#### 3. Получение cloudflared-cert.pem
+
+Сертификат создается автоматически при создании туннеля:
+
+```bash
+# Сертификат находится в домашней директории
+ls ~/.cloudflared/*.pem
+
+# Или в директории проекта
+cp ~/.cloudflared/*.pem cloudflare/cloudflared-cert.pem
+```
+
+#### 4. Конфигурация cloudflared.json
+
+Скопируйте шаблон и настройте:
+
+```bash
+cp cloudflare/cloudflared.json.example cloudflare/cloudflared.json
+
+# Отредактируйте файл с вашими настройками
+```
+
+Пример конфигурации:
+
+```json
+{
+  "tunnel": "telegram-bot-tunnel",
+  "credentials-file": "/etc/cloudflared/credentials.json",
+  "origin-cert": "/etc/cloudflared/cert.pem",
+  "ingress": [
+    {
+      "hostname": "your-domain.com",
+      "path": "/webhook/heleket",
+      "service": "http://webhook:8001",
+      "originRequest": {
+        "connectTimeout": "30s",
+        "noTLSVerify": false,
+        "httpHostHeader": "your-domain.com"
+      }
+    },
+    {
+      "service": "http_status:404"
+    }
+  ]
+}
+```
+
+### Настройка переменных окружения
+
+Добавьте в `.env` файл:
+
+```env
+# Cloudflare Tunnel Configuration
+CLOUDFLARE_TUNNEL_TOKEN=your_cloudflare_tunnel_token
+PRODUCTION_DOMAIN=your-domain.com
+ENABLE_HTTPS_REDIRECT=True
+```
+
+### Запуск туннеля
+
+#### Локальный запуск
+
+```bash
+# В директории проекта
+cloudflared tunnel run telegram-bot-tunnel
+```
+
+#### Через Docker
+
+Туннель уже настроен в `docker-compose.yml` и запускается автоматически вместе с сервисами.
+
+### Проверка работы
+
+1. Проверьте доступность вашего домена
+2. Убедитесь, что вебхуки работают через HTTPS
+3. Проверьте логи туннеля на ошибки
+
+### Отладка
+
+```bash
+# Просмотр статуса туннеля
+cloudflared tunnel info telegram-bot-tunnel
+
+# Проверка логов
+cloudflared tunnel run telegram-bot-tunnel --loglevel=info
+
+# Тестирование конфигурации
+cloudflared tunnel route dns telegram-bot-tunnel your-domain.com
 ```
 
 ## 📡 API и Вебхуки

@@ -519,3 +519,88 @@ services:
           cpus: '0.2'
           memory: 256M
 ```
+### Cloudflare Интеграция
+
+#### Компоненты архитектуры
+
+```mermaid
+graph TB
+    subgraph "Cloudflare Layer"
+        CF_T[Cloudflare Tunnel]
+        CF_W[Cloudflare Workers]
+        CF_DNS[Cloudflare DNS]
+    end
+    
+    subgraph "Application Layer"
+        NGINX[Load Balancer]
+        APP[Telegram Bot App]
+        WEBHOOK[Webhook Service]
+    end
+    
+    subgraph "External Services"
+        TG[Telegram API]
+        HELEKET[Heleket API]
+        FRAGMENT[Fragment API]
+    end
+    
+    CF_DNS --> CF_T
+    CF_T --> NGINX
+    CF_T --> CF_W
+    
+    NGINX --> APP
+    NGINX --> WEBHOOK
+    
+    APP --> TG
+    WEBHOOK --> HELEKET
+    APP --> FRAGMENT
+    
+    CF_W --> APP
+```
+
+#### Архитектура туннеля
+
+```mermaid
+graph LR
+    subgraph "Cloudflare Network"
+        CF_EDGE[Cloudflare Edge]
+        CF_NETWORK[Cloudflare Network]
+    end
+    
+    subgraph "Tunnel Components"
+        CF_AGENT[cloudflared Agent]
+        CF_TUNNEL[Argo Tunnel]
+        CF_ORIGIN[Origin Server]
+    end
+    
+    CF_EDGE --> CF_AGENT
+    CF_AGENT --> CF_TUNNEL
+    CF_TUNNEL --> CF_NETWORK
+    CF_NETWORK --> CF_ORIGIN
+```
+
+#### Настройка безопасности
+
+```mermaid
+graph TD
+    subgraph "Security Layers"
+        CF_SSL[SSL/TLS Termination]
+        CF_WAF[Web Application Firewall]
+        CF_DDOS[DDoS Protection]
+        CF_RATE[Rate Limiting]
+    end
+    
+    subgraph "Application Security"
+        APP_AUTH[Authentication]
+        APP_VALID[Input Validation]
+        APP_RATE[Application Rate Limiting]
+    end
+    
+    CF_SSL --> CF_WAF
+    CF_WAF --> CF_DDOS
+    CF_DDOS --> CF_RATE
+    
+    CF_RATE --> APP_AUTH
+    APP_AUTH --> APP_VALID
+    APP_VALID --> APP_RATE
+```
+

@@ -28,6 +28,7 @@ services:
       - FRAGMENT_COOKIES=${FRAGMENT_COOKIES}
       - FRAGMENT_AUTO_COOKIE_REFRESH=${FRAGMENT_AUTO_COOKIE_REFRESH}
       - FRAGMENT_COOKIE_REFRESH_INTERVAL=${FRAGMENT_COOKIE_REFRESH_INTERVAL}
+
     depends_on:
       db:
         condition: service_started
@@ -293,6 +294,8 @@ services:
         "--port",
         "8001",
       ]
+    ports:
+      - "8001:8001"
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
@@ -397,15 +400,57 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: telegram-cloudflared
+    restart: unless-stopped
+    command:
+      [
+        "tunnel",
+        "--config",
+        "/etc/cloudflared/config.json",
+        "run",
+        "telegram-bot-tunnel",
+      ]
+    environment:
+      - CLOUDFLARED_LOG_FILE=/var/log/cloudflared/cloudflared.log
+    volumes:
+      - ./cloudflare/cloudflared.json:/etc/cloudflared/config.json:ro
+      - ./cloudflare/cloudflared-credentials.json:/etc/cloudflared/credentials.json:ro
+      - ./cloudflare/cloudflared-cert.pem:/etc/cloudflared/cert.pem:ro
+      - cloudflared_data:/root/.cloudflared
+      - cloudflared_logs:/var/log/cloudflared
+    networks:
+      - bot-network
+    depends_on:
+      webhook:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "info", "telegram-bot-tunnel"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   redis_node_1_data:
+    driver: local
   redis_node_2_data:
+    driver: local
   redis_node_3_data:
+    driver: local
   redis_replica_1_data:
+    driver: local
   redis_replica_2_data:
+    driver: local
   redis_replica_3_data:
+    driver: local
+  cloudflared_data:
+    driver: local
   postgres_data:
+    driver: local
+  cloudflared_logs:
+    driver: local
 
 networks:
   bot-network:

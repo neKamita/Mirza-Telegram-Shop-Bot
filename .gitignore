@@ -160,6 +160,13 @@ nginx/ssl/
 .env.test.local
 .env.production.local
 
+# Sensitive configuration files (real files with credentials)
+.env
+cloudflared-credentials.json
+cloudflare/cloudflared-credentials.json
+cloudflared-tunnel-config.json
+cloudflared.json
+
 # Database
 *.db
 *.sqlite

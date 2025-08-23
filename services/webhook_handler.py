@@ -25,11 +25,23 @@ class WebhookHandler:
     async def handle_payment_webhook(self, request: Request) -> JSONResponse:
         """Обработка вебхука от платежной системы"""
         try:
+            # Настройка логирования для этой функции
+            logger = logging.getLogger(__name__)
+
             # Получаем данные из запроса
             body = await request.body()
             webhook_data = await request.json()
 
-            self.logger.info(f"Received webhook data: {webhook_data}")
+            # Дополнительное логирование для отладки домена
+            from config.settings import settings
+            if settings.domain_debug_logging or settings.webhook_domain_logging:
+                headers = dict(request.headers)
+                client_host = getattr(request.client, 'host', 'unknown') if request.client else 'unknown'
+                logger.info(f"Webhook domain debug - Client: {client_host}")
+                logger.info(f"Webhook domain debug - Host header: {headers.get('host', 'unknown')}")
+                logger.info(f"Webhook domain debug - Expected domain: {settings.production_domain}")
+                logger.info(f"Webhook domain debug - User-Agent: {headers.get('user-agent', 'unknown')}")
+
 
             # Валидация подписи
             if not await self._validate_webhook_signature(body, request.headers):
@@ -72,27 +84,33 @@ class WebhookHandler:
             )
 
     async def _validate_webhook_signature(self, body: bytes, headers: Dict[str, str]) -> bool:
-        """Валидация подписи вебхука от Heleket"""
+        """Валидация подписи вебхука от Heleket с использованием HMAC SHA256"""
         try:
-            # В реальном проекте здесь должна быть логика проверки HMAC подписи
-            # using secret key from Heleket
+            from config.settings import settings
+            webhook_secret = settings.webhook_secret
 
-            # Для примера просто проверяем наличие необходимых полей
-            webhook_data = json.loads(body.decode('utf-8'))
+            if not webhook_secret:
+                self.logger.warning("Webhook secret is not configured, skipping signature validation")
+                return True  # В режиме разработки разрешаем без подписи
 
-            # Проверяем обязательные поля
-            required_fields = ['uuid', 'status', 'amount']
-            for field in required_fields:
-                if field not in webhook_data:
-                    self.logger.error(f"Missing required field: {field}")
-                    return False
+            # Извлекаем подпись из заголовков
+            provided_signature = headers.get('X-Signature') or headers.get('x-signature')
 
-            # Здесь должна быть проверка HMAC подписи
-            # signature = headers.get('X-Signature')
-            # expected_signature = self._calculate_signature(body)
-            # if not hmac.compare_digest(signature, expected_signature):
-            #     return False
+            if not provided_signature:
+                self.logger.warning("No X-Signature header provided in webhook request")
+                return False
 
+            # Вычисляем ожидаемую подпись
+            expected_signature = self._calculate_signature(body)
+
+            # Используем постоянное время сравнение для безопасности
+            is_valid = hmac.compare_digest(expected_signature, provided_signature)
+
+            if not is_valid:
+                self.logger.error("Invalid webhook signature")
+                return False
+
+            self.logger.info("Webhook signature validation passed")
             return True
 
         except Exception as e:
