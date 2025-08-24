@@ -151,7 +151,7 @@ async def main():
 
     # Предварительная проверка Fragment API настроек
     try:
-        from services.fragment_service import FragmentService</search>
+        from services.fragment_service import FragmentService 
         
         # Проверяем формат seed phrase
         fragment_service = FragmentService()
