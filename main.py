@@ -252,7 +252,7 @@ async def main():
         await asyncio.gather(
             run_webhook_server(),
             run_telegram_bot(bot, dp)
-        )</search>
+        )
     else:
         # Запуск только Telegram бота
         await bot(DeleteWebhook(drop_pending_updates=True))
