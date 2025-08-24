@@ -7,17 +7,19 @@ from aiogram import Bot, Dispatcher
 from aiogram.methods import DeleteWebhook
 
 from config.settings import settings
-from services.webhook_app import app as webhook_app
+from services.webhooks import app as webhook_app
 from repositories.user_repository import UserRepository
 from repositories.balance_repository import BalanceRepository
-from services.payment_service import PaymentService
-from services.balance_service import BalanceService
-from services.star_purchase_service import StarPurchaseService
-from services.webhook_handler import WebhookHandler
-from services.user_cache import UserCache
-from services.payment_cache import PaymentCache
-from services.session_cache import SessionCache
-from services.rate_limit_cache import RateLimitCache
+from services.payment import PaymentService
+from services.payment import BalanceService
+from services.payment import StarPurchaseService
+from services.webhooks import WebhookHandler
+from services.cache import UserCache
+from services.cache import PaymentCache
+from services.cache import SessionCache
+from services.cache import RateLimitCache
+from services.fragment import FragmentService
+from services.infrastructure import FragmentCookieManager
 from handlers.message_handler import MessageHandler
 
 
@@ -37,10 +39,10 @@ async def init_cache_services():
             import redis.asyncio as redis
             from redis.cluster import RedisCluster
             from typing import Union
-            from services.user_cache import UserCache
-            from services.payment_cache import PaymentCache
-            from services.session_cache import SessionCache
-            from services.rate_limit_cache import RateLimitCache
+            from services.cache import UserCache
+            from services.cache import PaymentCache
+            from services.cache import SessionCache
+            from services.cache import RateLimitCache
 
             # Создаем Redis клиент с поддержкой кластера
             if settings.is_redis_cluster:
@@ -114,7 +116,7 @@ async def init_cache_services():
 async def run_webhook_server():
     """Запуск FastAPI сервера для обработки webhook"""
     import uvicorn
-    from services.webhook_app import app as webhook_app
+    from services.webhooks import app as webhook_app
     from config.settings import settings
 
     config = uvicorn.Config(
@@ -151,17 +153,17 @@ async def main():
 
     # Предварительная проверка Fragment API настроек
     try:
-        from services.fragment_service import FragmentService 
-        
+        from services.fragment import FragmentService
+
         # Проверяем формат seed phrase
         fragment_service = FragmentService()
         if not fragment_service._validate_seed_phrase():
             logging.error("Fragment API seed phrase validation failed. Application will continue but Fragment features may not work.")
         else:
             logging.info("Fragment API seed phrase validation passed")
-            
+
         # Инициализация cookies если включена автоматическая настройка
-        from services.fragment_cookie_manager import initialize_fragment_cookies
+        from services.infrastructure import initialize_fragment_cookies
         await initialize_fragment_cookies(fragment_service)
         
         ping_result = await fragment_service.ping()

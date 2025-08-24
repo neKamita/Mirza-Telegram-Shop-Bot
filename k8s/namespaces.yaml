@@ -1,0 +1,50 @@
+# Namespace Configurations for Multi-Environment Setup
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    name: production
+    environment: production
+  annotations:
+    description: "Production environment for Telegram Bot"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+  labels:
+    name: staging
+    environment: staging
+  annotations:
+    description: "Staging environment for Telegram Bot"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+  labels:
+    name: dev
+    environment: dev
+  annotations:
+    description: "Development environment for Telegram Bot"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    name: monitoring
+    environment: monitoring
+  annotations:
+    description: "Monitoring and Observability Stack"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: security
+  labels:
+    name: security
+    environment: security
+  annotations:
+    description: "Security and Compliance Tools"

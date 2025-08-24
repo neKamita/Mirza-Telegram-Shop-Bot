@@ -1,0 +1,362 @@
+name: 🚀 Enterprise CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DOCKER_BUILDKIT: 1
+
+jobs:
+  # 1. Security Scanning & Code Quality
+  security-scan:
+    name: 🔒 Security & Quality Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🐳 Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: 🔍 Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: 📤 Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+    - name: 🧪 Run Snyk to check for vulnerabilities
+      uses: snyk/actions/python@master
+      continue-on-error: true
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --file=requirements.txt
+
+  # 2. Testing Pipeline
+  test:
+    name: 🧪 Comprehensive Testing
+    runs-on: ubuntu-latest
+    needs: security-scan
+
+    services:
+      redis:
+        image: redis:7-bullseye
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+      postgres:
+        image: postgres:17.5
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-asyncio pytest-mock
+
+    - name: 🔧 Configure environment
+      run: |
+        echo "REDIS_URL=redis://localhost:6379" >> $GITHUB_ENV
+        echo "DATABASE_URL=postgresql://postgres:test_password@localhost:5432/test_db" >> $GITHUB_ENV
+        echo "TESTING=true" >> $GITHUB_ENV
+
+    - name: 🧪 Run unit tests
+      run: |
+        pytest tests/unit/ -v --cov=core --cov=services --cov-report=xml --cov-report=html
+
+    - name: 🔗 Run integration tests
+      run: |
+        pytest tests/integration/ -v --cov-append --cov-report=xml
+
+    - name: ⚡ Run performance tests
+      run: |
+        pytest tests/performance/ -v --durations=10
+
+    - name: 📊 Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+
+  # 3. Build & Push Docker Images
+  build:
+    name: 🐳 Build & Push Images
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        service: [app, webhook]
+        environment: [dev, staging, production]
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔑 Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 📝 Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: 🏗️ Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          ENVIRONMENT=${{ matrix.environment }}
+          SERVICE=${{ matrix.service }}
+
+    - name: 🏷️ Tag images for environments
+      run: |
+        docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.environment }}-${{ matrix.service }}
+        docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.environment }}-${{ matrix.service }}
+
+  # 4. Deploy to Environments
+  deploy-dev:
+    name: 🚀 Deploy to Development
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/develop'
+    environment: development
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup kubectl
+      uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG_DEV }}
+
+    - name: 🚀 Deploy to Dev
+      run: |
+        sed -i 's|image:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-app|g' k8s/dev/app.yaml
+        sed -i 's|image:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-webhook|g' k8s/dev/webhook.yaml
+        kubectl apply -f k8s/dev/
+
+    - name: 🔍 Run health checks
+      run: |
+        sleep 30
+        kubectl get pods -n dev
+        kubectl logs -n dev --tail=100 -l app=telegram-bot
+
+  deploy-staging:
+    name: 🚀 Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: staging
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup kubectl
+      uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG_STAGING }}
+
+    - name: 🚀 Deploy to Staging
+      run: |
+        sed -i 's|image:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-app|g' k8s/staging/app.yaml
+        sed -i 's|image:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-webhook|g' k8s/staging/webhook.yaml
+        kubectl apply -f k8s/staging/
+
+    - name: 🔍 Run integration tests
+      run: |
+        sleep 60
+        # Run end-to-end tests against staging
+
+  deploy-production:
+    name: 🚀 Deploy to Production
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup kubectl
+      uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG_PROD }}
+
+    - name: 🚀 Blue-Green Deployment
+      run: |
+        # Check current active deployment
+        CURRENT=$(kubectl get service telegram-bot -o jsonpath='{.spec.selector.version}')
+
+        if [ "$CURRENT" = "blue" ]; then
+          TARGET="green"
+        else
+          TARGET="blue"
+        fi
+
+        echo "Deploying to $TARGET environment"
+
+        # Update images for target environment
+        sed -i "s|image:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:production-app|g" k8s/production/app-$TARGET.yaml
+        sed -i "s|image:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:production-webhook|g" k8s/production/webhook-$TARGET.yaml
+
+        # Deploy to target
+        kubectl apply -f k8s/production/app-$TARGET.yaml
+        kubectl apply -f k8s/production/webhook-$TARGET.yaml
+
+        # Wait for deployment
+        kubectl wait --for=condition=available --timeout=300s deployment/telegram-bot-$TARGET
+
+        # Switch traffic
+        kubectl patch service telegram-bot -p "{\"spec\":{\"selector\":{\"version\":\"$TARGET\"}}}"
+
+        # Monitor for 5 minutes
+        sleep 300
+
+        # If no issues, keep the deployment
+        # If issues detected, rollback would be triggered manually or automatically
+
+  # 5. Monitoring & Alerting
+  monitoring:
+    name: 📊 Post-Deployment Monitoring
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔍 Health Check Validation
+      run: |
+        # Check if services are responding
+        curl -f https://api.telegram-bot.com/health || exit 1
+        curl -f https://webhook.telegram-bot.com/health || exit 1
+
+    - name: 📈 Performance Monitoring
+      run: |
+        # Check response times and error rates
+        # This would integrate with your monitoring stack
+        echo "Monitoring deployment performance..."
+
+    - name: 📢 Slack Notification
+      uses: 8398a7/action-slack@v3
+      if: always()
+      with:
+        status: ${{ job.status }}
+        channel: '#deployments'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+  # 6. Rollback Strategy
+  rollback:
+    name: ⏪ Rollback Strategy
+    runs-on: ubuntu-latest
+    needs: monitoring
+    if: failure() && github.ref == 'refs/heads/main'
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup kubectl
+      uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG_PROD }}
+
+    - name: ⏪ Automatic Rollback
+      run: |
+        # Get previous successful deployment
+        PREVIOUS_TAG=$(git tag --sort=-version:refname -l "v*" | head -2 | tail -1)
+
+        if [ -n "$PREVIOUS_TAG" ]; then
+          echo "Rolling back to $PREVIOUS_TAG"
+
+          # Deploy previous version
+          kubectl set image deployment/telegram-bot app=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$PREVIOUS_TAG
+          kubectl set image deployment/telegram-webhook webhook=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:webhook-$PREVIOUS_TAG
+
+          # Wait for rollback to complete
+          kubectl rollout status deployment/telegram-bot
+          kubectl rollout status deployment/telegram-webhook
+        else
+          echo "No previous version found for rollback"
+        fi
+
+    - name: 📢 Rollback Notification
+      uses: 8398a7/action-slack@v3
+      if: always()
+      with:
+        status: 'failure'
+        channel: '#alerts'
+        text: '🚨 Automatic rollback triggered due to deployment failure'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}

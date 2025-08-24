@@ -1,8 +1,20 @@
+version: '3.8'
+
 services:
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - FRAGMENT_AUTO_COOKIE_REFRESH=${FRAGMENT_AUTO_COOKIE_REFRESH:-false}
     container_name: telegram-bot
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/tmp
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
@@ -28,25 +40,36 @@ services:
       - FRAGMENT_COOKIES=${FRAGMENT_COOKIES}
       - FRAGMENT_AUTO_COOKIE_REFRESH=${FRAGMENT_AUTO_COOKIE_REFRESH}
       - FRAGMENT_COOKIE_REFRESH_INTERVAL=${FRAGMENT_COOKIE_REFRESH_INTERVAL}
+      - DEBUG=${DEBUG}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - ENVIRONMENT=${ENVIRONMENT}
 
     depends_on:
       db:
-        condition: service_started
+        condition: service_healthy
       redis-cluster-creator:
         condition: service_completed_successfully
     volumes:
-      - ./logs:/app/logs
-      - ${SSL_CERT_PATH}:/app/ssl/cert.pem
-      - ${SSL_KEY_PATH}:/app/ssl/key.pem
+      - ./logs:/app/logs:rw
+      - ./ssl:/app/ssl:ro
     networks:
       - bot-network
       - redis-cluster
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     healthcheck:
-      test: ["CMD", "python", "-c", "import os; print('App healthy')"]
-      interval: 5s
-      timeout: 3s
-      retries: 2
-      start_period: 10s
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+      disable: false
 
   # Database service
   db:
@@ -59,15 +82,25 @@ services:
       - POSTGRES_PASSWORD=${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./logs:/var/log/postgresql:rw
     ports:
       - "5433:5432"
     networks:
       - bot-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.2'
+          memory: 256M
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
+      test: ["CMD-SHELL", "pg_isready -U postgres -d telegram_bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # Redis Cluster Configuration
   redis-node-1:
@@ -80,6 +113,7 @@ services:
     volumes:
       - ./redis/conf/redis.conf:/etc/redis/redis.conf:ro
       - redis_node_1_data:/data
+      - ./logs:/var/log/redis:rw
     ports:
       - "7379:7379"
     networks:
@@ -98,10 +132,10 @@ services:
           "-c",
           "redis-cli -p 7379 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
         ]
-      interval: 3s
-      timeout: 2s
+      interval: 10s
+      timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 30s
 
   redis-node-2:
     image: redis:7-bullseye
@@ -113,6 +147,7 @@ services:
     volumes:
       - ./redis/conf/redis.conf:/etc/redis/redis.conf:ro
       - redis_node_2_data:/data
+      - ./logs:/var/log/redis:rw
     ports:
       - "7380:7380"
     networks:
@@ -131,10 +166,10 @@ services:
           "-c",
           "redis-cli -p 7380 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
         ]
-      interval: 3s
-      timeout: 2s
+      interval: 10s
+      timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 30s
 
   redis-node-3:
     image: redis:7-bullseye
@@ -146,6 +181,7 @@ services:
     volumes:
       - ./redis/conf/redis.conf:/etc/redis/redis.conf:ro
       - redis_node_3_data:/data
+      - ./logs:/var/log/redis:rw
     ports:
       - "7381:7381"
     networks:
@@ -164,10 +200,10 @@ services:
           "-c",
           "redis-cli -p 7381 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
         ]
-      interval: 3s
-      timeout: 2s
+      interval: 10s
+      timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 30s
 
   # Redis Replicas
   redis-replica-1:
@@ -180,13 +216,14 @@ services:
     volumes:
       - ./redis/conf/redis.conf:/etc/redis/redis.conf:ro
       - redis_replica_1_data:/data
+      - ./logs:/var/log/redis:rw
     ports:
       - "7382:7382"
     networks:
       - redis-cluster
     depends_on:
       redis-node-1:
-        condition: service_started
+        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -201,10 +238,10 @@ services:
           "-c",
           "redis-cli -p 7382 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
         ]
-      interval: 3s
-      timeout: 2s
+      interval: 10s
+      timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 30s
 
   redis-replica-2:
     image: redis:7-bullseye
@@ -216,13 +253,14 @@ services:
     volumes:
       - ./redis/conf/redis.conf:/etc/redis/redis.conf:ro
       - redis_replica_2_data:/data
+      - ./logs:/var/log/redis:rw
     ports:
       - "7383:7383"
     networks:
       - redis-cluster
     depends_on:
       redis-node-2:
-        condition: service_started
+        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -237,10 +275,10 @@ services:
           "-c",
           "redis-cli -p 7383 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
         ]
-      interval: 3s
-      timeout: 2s
+      interval: 10s
+      timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 30s
 
   redis-replica-3:
     image: redis:7-bullseye
@@ -252,13 +290,14 @@ services:
     volumes:
       - ./redis/conf/redis.conf:/etc/redis/redis.conf:ro
       - redis_replica_3_data:/data
+      - ./logs:/var/log/redis:rw
     ports:
       - "7384:7384"
     networks:
       - redis-cluster
     depends_on:
       redis-node-3:
-        condition: service_started
+        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -273,26 +312,39 @@ services:
           "-c",
           "redis-cli -p 7384 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
         ]
-      interval: 3s
-      timeout: 2s
+      interval: 10s
+      timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 30s
 
   # Webhook service for balance and payment processing
   webhook:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - FRAGMENT_AUTO_COOKIE_REFRESH=${FRAGMENT_AUTO_COOKIE_REFRESH:-false}
     container_name: telegram-bot-webhook
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/tmp
     command:
       [
         "python",
         "-m",
         "uvicorn",
-        "services.webhook_app:app",
+        "services.webhooks.webhook_app:app",
         "--host",
         "0.0.0.0",
         "--port",
         "8001",
+        "--workers",
+        "2",
+        "--access-log",
       ]
     ports:
       - "8001:8001"
@@ -300,6 +352,9 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
       - REDIS_CLUSTER_URL=${REDIS_CLUSTER_URL}
+      - REDIS_CLUSTER_ENABLED=${REDIS_CLUSTER_ENABLED}
+      - REDIS_CLUSTER_NODES=${REDIS_CLUSTER_NODES}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
       - MERCHANT_UUID=${MERCHANT_UUID}
       - API_KEY=${API_KEY}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
@@ -315,19 +370,29 @@ services:
       - FRAGMENT_COOKIE_REFRESH_INTERVAL=${FRAGMENT_COOKIE_REFRESH_INTERVAL}
     depends_on:
       db:
-        condition: service_started
+        condition: service_healthy
       redis-cluster-creator:
         condition: service_completed_successfully
     volumes:
-      - ./logs:/app/logs
+      - ./logs:/app/logs:rw
+      - ./ssl:/app/ssl:ro
     networks:
       - bot-network
       - redis-cluster
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.2'
+          memory: 256M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
 
   # Enhanced Nginx with SSL and WebSocket support
   nginx:
@@ -339,18 +404,31 @@ services:
       - "8443:443"
       - "8081:8080" # WebSocket port
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/conf.d:/etc/nginx/conf.d
-      - ./nginx/ssl:/etc/nginx/ssl
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./logs:/var/log/nginx:rw
     depends_on:
-      - app
+      app:
+        condition: service_healthy
+      webhook:
+        condition: service_healthy
     networks:
       - bot-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.3'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
 
   # Redis Cluster creation using redis-cli --cluster
   redis-cluster-creator:
@@ -375,9 +453,14 @@ services:
     restart: "no"
     volumes:
       - ./logs:/var/log
-      - ./redis/scripts:/scripts
+      - ./redis/scripts:/scripts:ro
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD}
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64M
 
   # Redis Cluster Monitor - автоматическая проверка состояния и восстановление
   redis-cluster-monitor:
@@ -392,14 +475,20 @@ services:
     restart: unless-stopped
     volumes:
       - ./logs:/var/log
-      - ./redis/scripts:/scripts
+      - ./redis/scripts:/scripts:ro
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD}
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64M
     healthcheck:
       test: ["CMD", "sh", "-c", "pgrep -f 'redis-cluster-monitor' >/dev/null"]
       interval: 30s
       timeout: 10s
       retries: 3
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: telegram-cloudflared
@@ -419,12 +508,17 @@ services:
       - ./cloudflare/cloudflared-credentials.json:/etc/cloudflared/credentials.json:ro
       - ./cloudflare/cloudflared-cert.pem:/etc/cloudflared/cert.pem:ro
       - cloudflared_data:/root/.cloudflared
-      - cloudflared_logs:/var/log/cloudflared
+      - ./logs:/var/log/cloudflared:rw
     networks:
       - bot-network
     depends_on:
       webhook:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64M
     healthcheck:
       test: ["CMD", "cloudflared", "tunnel", "info", "telegram-bot-tunnel"]
       interval: 30s
@@ -449,38 +543,13 @@ volumes:
     driver: local
   postgres_data:
     driver: local
-  cloudflared_logs:
-    driver: local
 
 networks:
   bot-network:
     driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: bot-bridge
   redis-cluster:
     driver: bridge
-# ===================================================================
-# РЕКОМЕНДАЦИИ ПО НАСТРОЙКЕ СИСТЕМЫ
-# ===================================================================
-
-# ВАЖНО: Для корректной работы Redis кластера с выделенной памятью необходимо настроить системные параметры
-
-# 1. Настройка overcommit_memory для хоста (не внутри контейнера):
-#    Добавьте в /etc/sysctl.conf:
-#    vm.overcommit_memory = 1
-#    vm.swappiness = 10
-#    vm.max_map_count = 262144
-#
-# 2. Примените изменения:
-#    sysctl -p
-#
-# 3. Проверьте текущие настройки:
-#    sysctl vm.overcommit_memory
-#
-# Если вы видите предупреждение "Memory overcommit must be enabled", выполните:
-#    sysctl vm.overcommit_memory=1
-#
-# Рекомендуемые значения:
-# - vm.overcommit_memory = 1: Разрешает выделение памяти даже если физической памяти недостаточно
-# - vm.swappiness = 10: Ограничивает использование swap для лучшей производительности
-# - vm.max_map_count = 262144: Увеличивает лимит для процессов с большим количеством memory mappings
-#
-# Для Docker Swarm/Kubernetes эти настройки должны применяться на уровне узлов кластера
+    driver_opts:
+      com.docker.network.bridge.name: redis-bridge

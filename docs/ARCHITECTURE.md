@@ -4,6 +4,8 @@
 
 - [🏗️ Общая архитектура](#️-общая-архитектура)
 - [🧩 Компонентная архитектура](#-компонетная-архитектура)
+- [📝 Централизованное форматирование](#-централизованное-форматирование)
+- [🔗 Интеграция utils и services](#-интеграция-utils-и-services)
 - [💾 Структура базы данных](#-структура-базы-данных)
 - [🔄 Потоки данных](#-потоки-данных)
 - [🛡️ Паттерны проектирования](#️-паттерны-проектирования)
@@ -38,6 +40,12 @@ graph TB
         CS[Cache Service]
     end
 
+    subgraph "Utils Layer"
+        MF[Message Formatter]
+        MT[Message Templates]
+        RM[Rate Limit Messages]
+    end
+
     subgraph "Data Layer"
         UR[User Repository]
         BR[Balance Repository]
@@ -48,28 +56,34 @@ graph TB
     TG --> MH
     REST --> MH
     WEBHOOK --> PS
-    
+
     MH --> PS
     MH --> BS
     MH --> SPS
     MH --> FS
     MH --> RL
     MH --> EH
-    
+
     PH --> PS
     PuH --> SPS
     BalH --> BS
-    
+
     PS --> UR
     BS --> BR
     SPS --> UR
     SPS --> BR
     FS --> UR
-    
+
+    PS --> MF
+    BS --> MF
+    SPS --> MF
+    FS --> MF
+    MF --> MT
+
     UR --> DB
     BR --> DB
     CS --> CACHE
-    
+
     PS --> CS
     BS --> CS
     SPS --> CS
@@ -127,6 +141,72 @@ graph TD
     BLL_SERVICES --> INF_EXTERNAL
 ```
 
+## 📝 Централизованное форматирование
+
+### 4.1 MessageFormatter
+- Единый класс для форматирования всех типов сообщений
+- Интегрирован в BalanceService и PaymentService
+- Обеспечивает консистентность интерфейса
+
+### 4.2 MessageTemplate
+- Централизованные шаблоны сообщений
+- Единые константы эмодзи и статусов
+- Устранение дублирования HTML форматирования
+
+## 🔗 Интеграция utils и services
+
+### Архитектурный поток данных
+
+```mermaid
+graph TD
+    subgraph "🛠️ Utils Layer"
+        MF["📨 MessageFormatter<br/>(центральное форматирование)"]
+        MT["📝 MessageTemplates<br/>(шаблоны и константы)"]
+        RM["⚡ RateLimitMessages<br/>(сообщения ограничений)"]
+    end
+
+    subgraph "⚙️ Services Layer"
+        PS["💳 PaymentService<br/>(пополнение баланса)"]
+        BS["💰 BalanceService<br/>(запросы баланса)"]
+        SPS["⭐ StarPurchaseService<br/>(покупка звезд)"]
+        FS["💎 FragmentService<br/>(Fragment API)"]
+    end
+
+    subgraph "🎯 Handlers Layer"
+        PH["💳 PaymentHandler<br/>(обработка платежей)"]
+        BalH["💰 BalanceHandler<br/>(запросы баланса)"]
+        PuH["🛒 PurchaseHandler<br/>(покупки)"]
+        MH["📨 MessageHandler<br/>(общее управление)"]
+    end
+
+    MF --> MT
+    MF --> RM
+
+    PS --> MF
+    BS --> MF
+    SPS --> MF
+    FS --> MF
+
+    PS --> PH
+    BS --> BalH
+    SPS --> PuH
+    MH --> PS
+    MH --> BS
+    MH --> SPS
+
+    PH --> MH
+    BalH --> MH
+    PuH --> MH
+```
+
+### Принципы интеграции
+
+- **Единая точка форматирования**: Все сообщения проходят через MessageFormatter
+- **Опциональная зависимость**: Services могут работать без MessageFormatter (fallback)
+- **Консистентность интерфейса**: Единые шаблоны для всех типов сообщений
+- **Отделение логики**: Форматирование отделено от бизнес-логики
+- **Расширяемость**: Легкое добавление новых типов сообщений
+
 ## 🧩 Компонентная архитектура
 
 ### Handlers Layer
@@ -158,28 +238,93 @@ graph LR
 
 ```mermaid
 graph LR
-    subgraph "⚙️ SERVICES LAYER"
-        PS["💳 PaymentService<br/>(Heleket integration)"]
-        BS["💰 BalanceService<br/>(balance management)"]
-        SPS["⭐ StarPurchaseService<br/>(purchase logic)"]
-        FS["💎 FragmentService<br/>(Fragment API)"]
-        CS["🗄️ CacheService<br/>(Redis operations)"]
-        RL["🚦 RateLimitService<br/>(throttling)"]
-        HS["❤️ HealthService<br/>(monitoring)"]
-        WS["🔌 WebSocketService<br/>(real-time)"]
+    subgraph "⚙️ SERVICES LAYER (МОДУЛЬНАЯ ОРГАНИЗАЦИЯ)"
+        subgraph "🗄️ cache/"
+            UC["👤 UserCache<br/>(кеш пользователей)"]
+            PC["💳 PaymentCache<br/>(кеш платежей)"]
+            RLC["🚦 RateLimitCache<br/>(ограничения запросов)"]
+            SC["📦 SessionCache<br/>(кеш сессий)"]
+        end
+
+        subgraph "💰 payment/"
+            PS["💳 PaymentService<br/>(платежи Heleket)"]
+            BS["💰 BalanceService<br/>(баланс + форматирование)"]
+            SPS["⭐ StarPurchaseService<br/>(покупка звезд)"]
+        end
+
+        subgraph "🔗 webhooks/"
+            WH["🔗 WebhookHandler<br/>(обработка вебхуков)"]
+            WA["🌐 WebhookApp<br/>(FastAPI приложение)"]
+        end
+
+        subgraph "🏗️ infrastructure/"
+            HS["❤️ HealthService<br/>(мониторинг)"]
+            CB["🔄 CircuitBreaker<br/>(предохранитель)"]
+            WS["🔌 WebSocketService<br/>(WebSocket)"]
+            FCM["⚙️ FragmentCookieManager<br/>(куки Fragment)"]
+        end
+
+        subgraph "💎 fragment/"
+            FS["💎 FragmentService<br/>(Fragment API)"]
+        end
     end
-    
+
+    subgraph "🛠️ UTILS INTEGRATION"
+        MF["📨 MessageFormatter<br/>(центральное форматирование)"]
+        MT["📝 MessageTemplates<br/>(шаблоны)"]
+    end
+
     PS --> CS
     BS --> CS
     SPS --> CS
     FS --> CS
-    RL --> CS
-    
+    RLC --> CS
+
     PS --> UR
     BS --> BR
     SPS --> UR
     SPS --> BR
     FS --> SPS
+
+    PS --> MF
+    BS --> MF
+    MF --> MT
+```
+
+#### Новые методы в BalanceService
+
+```python
+class BalanceService:
+    def __init__(self, message_formatter: Optional[MessageFormatter] = None):
+        self.message_formatter = message_formatter
+
+    async def get_balance_with_formatting(self, user_id: int) -> str:
+        """Получение баланса с форматированием через MessageFormatter"""
+        balance = await self.get_balance(user_id)
+        return self.message_formatter.format_balance_message(balance)
+
+    async def get_transaction_history_formatted(self, user_id: int) -> str:
+        """История транзакций с централизованным форматированием"""
+        transactions = await self.get_transaction_history(user_id)
+        return self.message_formatter.format_transaction_history(transactions)
+```
+
+#### Новые методы в PaymentService
+
+```python
+class PaymentService:
+    def __init__(self, message_formatter: Optional[MessageFormatter] = None):
+        self.message_formatter = message_formatter
+
+    async def create_recharge_invoice_formatted(self, user_id: int, amount: float) -> str:
+        """Создание счета на пополнение с форматированием"""
+        invoice = await self.create_recharge_invoice(user_id, amount)
+        return self.message_formatter.format_payment_invoice(invoice)
+
+    async def get_payment_status_formatted(self, payment_id: str) -> str:
+        """Статус платежа с централизованным форматированием"""
+        status = await self.get_payment_status(payment_id)
+        return self.message_formatter.format_payment_status(status)
 ```
 
 ### Repository Layer
@@ -298,28 +443,117 @@ sequenceDiagram
     participant WH as 🔗 Webhook Handler
     participant DB as 🗄️ Database
     participant C as 📦 Cache
+    participant MF as 📨 MessageFormatter
 
     U->>TB: /recharge 100
     TB->>PS: create_recharge_invoice(user_id, 100)
     PS->>DB: create_transaction(pending)
     PS->>H: POST /create_invoice
     H-->>PS: invoice_url + uuid
+    PS->>MF: format_payment_invoice(invoice_data)
+    MF-->>PS: formatted_message
     PS->>C: cache_payment(uuid, user_id)
-    PS-->>TB: invoice_url
+    PS-->>TB: formatted_message
     TB-->>U: 💳 Ссылка для оплаты
-    
+
     Note over U,H: Пользователь оплачивает счет
-    
+
     H->>WH: POST /webhook/heleket
     WH->>C: get_payment_info(uuid)
     WH->>DB: update_transaction(completed)
     WH->>DB: update_user_balance(+100)
     WH->>C: invalidate_user_cache(user_id)
-    WH->>TB: notify_payment_success(user_id)
+    WH->>PS: get_payment_status_formatted(uuid)
+    PS->>MF: format_payment_status(success)
+    MF-->>PS: success_message
+    PS-->>WH: success_message
+    WH->>TB: notify_payment_success(user_id, success_message)
     TB->>U: ✅ Пополнение успешно! +100 💰
 ```
 
+### Поток запроса баланса с централизованным форматированием
+
+```mermaid
+sequenceDiagram
+    participant U as 👤 User
+    participant TB as 🤖 Telegram Bot
+    participant BalH as 💰 Balance Handler
+    participant BS as 💰 Balance Service
+    participant DB as 🗄️ Database
+    participant C as 📦 Cache
+    participant MF as 📨 MessageFormatter
+    participant MT as 📝 MessageTemplates
+
+    U->>TB: /balance
+    TB->>BalH: handle_balance_request(user_id)
+    BalH->>BS: get_balance_with_formatting(user_id)
+    BS->>DB: get_user_balance(user_id)
+    DB-->>BS: balance_data
+    BS->>C: cache_balance(user_id, balance_data)
+    BS->>MF: format_balance_message(balance_data)
+    MF->>MT: get_balance_template()
+    MT-->>MF: template_string
+    MF-->>BS: formatted_balance
+    BS-->>BalH: formatted_balance
+    BalH-->>TB: formatted_balance
+    TB-->>U: 💰 Ваш баланс: 150.00 TON
+
+    Note over MF,MT: Централизованное форматирование обеспечивает<br/>консистентность всех сообщений
+```
+
 ## 🛡️ Паттерны проектирования
+
+### Centralized Formatting Pattern
+
+```python
+class MessageFormatter:
+    """Централизованный класс для форматирования сообщений"""
+
+    def __init__(self, message_templates: MessageTemplates):
+        self.templates = message_templates
+
+    def format_balance_message(self, balance: Dict[str, Any]) -> str:
+        """Форматирование сообщения о балансе"""
+        template = self.templates.BALANCE_MESSAGE
+        return template.format(
+            amount=balance['amount'],
+            currency=balance['currency'],
+            emoji=self.templates.EMOJI['money']
+        )
+
+    def format_payment_status(self, status: str, amount: float = None) -> str:
+        """Форматирование статуса платежа"""
+        templates = {
+            'success': self.templates.PAYMENT_SUCCESS,
+            'pending': self.templates.PAYMENT_PENDING,
+            'failed': self.templates.PAYMENT_FAILED
+        }
+        template = templates.get(status, self.templates.PAYMENT_UNKNOWN)
+        return template.format(
+            amount=amount or 0,
+            emoji=self.templates.EMOJI['success']
+        )
+
+class BalanceService:
+    """Сервис с опциональной интеграцией MessageFormatter"""
+
+    def __init__(self, message_formatter: Optional[MessageFormatter] = None):
+        self.message_formatter = message_formatter
+
+    async def get_balance_with_formatting(self, user_id: int) -> str:
+        """Получение баланса с форматированием (опционально)"""
+        balance = await self.get_balance(user_id)
+
+        if self.message_formatter:
+            return self.message_formatter.format_balance_message(balance)
+
+        # Fallback к простому форматированию
+        return f"Баланс: {balance['amount']} {balance['currency']}"
+
+    async def get_balance_raw(self, user_id: int) -> Dict[str, Any]:
+        """Получение баланса без форматирования"""
+        return await self.get_balance(user_id)
+```
 
 ### Service Layer Pattern
 
@@ -603,4 +837,166 @@ graph TD
     APP_AUTH --> APP_VALID
     APP_VALID --> APP_RATE
 ```
+### BaseCache Pattern
+
+```mermaid
+graph TB
+    subgraph "BaseCache Architecture"
+        BC[BaseCache<br/>Абстрактный базовый класс]
+        BC --> LCache[LocalCache<br/>Локальное кеширование]
+        BC --> RClient[RedisClient<br/>Redis взаимодействие]
+        BC --> Serial[CacheSerializer<br/>Сериализация данных]
+        BC --> Except[CacheExceptions<br/>Обработка ошибок]
+
+        LCache --> LRU[LRU Eviction<br/>Алгоритм вытеснения]
+        LCache --> TTL[TTL Management<br/>Управление временем жизни]
+
+        RClient --> Circuit[Circuit Breaker<br/>Предохранитель]
+        RClient --> Retry[Retry Logic<br/>Повторные попытки]
+        RClient --> Health[Health Check<br/>Проверка здоровья]
+    end
+
+    subgraph "Cache Implementations"
+        SC[SessionCache<br/>Кеш сессий]
+        UC[UserCache<br/>Кеш пользователей]
+        PC[PaymentCache<br/>Кеш платежей]
+        RLC[RateLimitCache<br/>Ограничение запросов]
+
+        SC --> BC
+        UC --> BC
+        PC --> BC
+        RLC --> BC
+    end
+
+    subgraph "Graceful Degradation"
+        BC --> GD[Graceful Degradation<br/>Graceful деградация]
+        GD --> Local[Локальный кеш fallback]
+        GD --> Error[Обработка ошибок]
+        GD --> Metrics[Метрики производительности]
+    end
+
+    classDef abstract fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef component fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef feature fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+
+    class BC abstract
+    class SC,UC,PC,RLC component
+    class LCache,RClient,Serial,Except,GD feature
+```
+
+#### Принципы BaseCache
+
+- **Единая архитектура**: Все сервисы кеширования наследуются от BaseCache
+- **Унифицированные операции**: Стандартные методы get/set/delete/exists
+- **Graceful degradation**: Автоматический fallback на локальный кеш
+- **Метрики производительности**: Встроенный мониторинг hit/miss rate
+- **Обработка ошибок**: Централизованная обработка Redis ошибок
+- **Circuit Breaker**: Защита от cascade failures
+- **Health checks**: Мониторинг здоровья компонентов
+
+#### Преимущества BaseCache
+
+```python
+# Пример использования BaseCache
+class MyCache(BaseCache):
+    def __init__(self, redis_client, **kwargs):
+        super().__init__(redis_client, **kwargs)
+        self._cache_prefix = "my_service"
+
+    async def get(self, key: str) -> Optional[Any]:
+        return await self._get_from_redis(key)  # Унаследованный метод
+
+    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+        return await self._set_in_redis(key, value, ttl)  # Унаследованный метод
+
+    async def delete(self, key: str) -> bool:
+        return await self._delete_from_redis(key)  # Унаследованный метод
+```
+
+### BalanceService Components Architecture
+
+```mermaid
+graph TD
+    subgraph "BalanceService Architecture"
+        BS[BalanceService<br/>Оркестратор]
+
+        subgraph "Core Components"
+            BM[BalanceManager<br/>Управление балансом]
+            TM[TransactionManager<br/>Управление транзакциями]
+            BF[BalanceFormatter<br/>Форматирование сообщений]
+        end
+
+        subgraph "Dependencies"
+            BR[BalanceRepository<br/>Репозиторий баланса]
+            UC[UserCache<br/>Кеш пользователей]
+            MF[MessageFormatter<br/>Форматтер сообщений]
+        end
+
+        BS --> BM
+        BS --> TM
+        BS --> BF
+
+        BM --> BR
+        BM --> UC
+
+        TM --> BR
+        TM --> UC
+
+        BF --> MF
+    end
+
+    subgraph "SOLID Principles"
+        SRP["🔹 SRP<br/>Single Responsibility"]
+        OCP["🔹 OCP<br/>Open/Closed"]
+        LSP["🔹 LSP<br/>Liskov Substitution"]
+        ISP["🔹 ISP<br/>Interface Segregation"]
+        DIP["🔹 DIP<br/>Dependency Inversion"]
+
+        BM --> SRP
+        BS --> OCP
+        BF --> LSP
+        TM --> ISP
+        BM --> DIP
+        TM --> DIP
+        BF --> DIP
+    end
+
+    classDef orchestrator fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef component fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef dependency fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef principle fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+
+    class BS orchestrator
+    class BM,TM,BF component
+    class BR,UC,MF dependency
+    class SRP,OCP,LSP,ISP,DIP principle
+```
+
+#### BalanceService Components
+
+1. **BalanceManager** (129 строк)
+   - Управление балансом пользователей
+   - Cache-Aside паттерн для производительности
+   - Проверка достаточности средств
+   - Обновление баланса с инвалидацией кеша
+
+2. **TransactionManager** (200 строк)
+   - Полный жизненный цикл транзакций
+   - Создание, завершение, отмена транзакций
+   - Валидация транзакционных данных
+   - Управление статусами транзакций
+
+3. **BalanceFormatter** (250 строк)
+   - Централизованное форматирование сообщений
+   - Опциональная интеграция с MessageFormatter
+   - Fallback сообщения при ошибках
+   - Консистентность интерфейса пользователя
+
+#### Преимущества модульной архитектуры
+
+- **Тестируемость**: Каждый компонент можно тестировать отдельно
+- **Поддерживаемость**: Изменения в одном компоненте не затрагивают другие
+- **Расширяемость**: Легко добавлять новые функции в соответствующие компоненты
+- **Читаемость**: Код организован логически, легче понимать ответственность
+- **Переиспользование**: Компоненты могут использоваться другими сервисами
 

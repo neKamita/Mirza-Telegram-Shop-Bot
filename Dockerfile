@@ -1,8 +1,11 @@
-FROM python:3.11-slim
+# Multi-stage build для оптимизации размера образа
+FROM python:3.11-slim AS base
 
+# Установка системных зависимостей для сборки
+FROM base AS builder
 WORKDIR /app
 
-# Установка системных зависимостей
+# Установка системных зависимостей для Chrome и сборки Python пакетов
 RUN apt-get update && apt-get install -y \
     gcc \
     curl \
@@ -11,43 +14,62 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     && rm -rf /var/lib/apt/lists/*
 
-# Установка Chrome и ChromeDriver для автоматического обновления cookies
-# Используем более надежный подход с установкой через apt
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /etc/apt/trusted.gpg.d/google-archive.gpg && \
+# Копирование requirements и установка зависимостей в virtual environment
+COPY requirements.txt .
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Финальный образ
+FROM base AS final
+
+# Создание непривилегированного пользователя
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Установка системных зависимостей для runtime
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Установка Chrome только если требуется Fragment функциональность
+RUN if [ "$FRAGMENT_AUTO_COOKIE_REFRESH" = "true" ]; then \
+    wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /etc/apt/trusted.gpg.d/google-archive.gpg && \
     echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list && \
     apt-get update && \
     apt-get install -y google-chrome-stable && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/*; \
+    fi
 
-# Установка ChromeDriver через pip (более надежный способ)
-RUN pip install --no-cache-dir chromedriver-py
+# Копирование виртуального окружения из builder stage
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Копирование requirements и установка зависимостей
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Установка Selenium для автоматического обновления cookies (если включено)
-RUN pip install --no-cache-dir selenium
+# Установка рабочей директории
+WORKDIR /app
 
 # Копирование кода приложения
 COPY . .
 
-# Создание директорий для логов и ssl
-RUN mkdir -p /app/logs /app/ssl
+# Создание необходимых директорий
+RUN mkdir -p /app/logs /app/ssl && \
+    chown -R appuser:appuser /app
 
 # Установка переменных окружения
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
-ENV CHROMEDRIVER_PATH=/usr/local/bin/chromedriver
+ENV PYTHONPATH="/app:$PYTHONPATH"
 
-# Expose ports for webhook service
+# Переключение на непривилегированного пользователя
+USER appuser
+
+# Экспорт портов
 EXPOSE 8001
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import asyncio; import sys; sys.path.append('/app'); from repositories.user_repository import UserRepository; import os; repo = UserRepository(os.getenv('DATABASE_URL', '')); asyncio.run(repo.create_tables())" || exit 1
+# Оптимизированный health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8001/health || exit 1
 
-# Предварительная проверка настроек Fragment API
-# Запуск скрипта обновления Fragment cookies перед запуском приложения
-# И запуск периодического обновлятора как фоновую задачу
-CMD ["sh", "-c", "python scripts/precheck_fragment.py && python scripts/update_fragment_cookies.py && python scripts/periodic_cookie_refresher.py & python main.py"]
+# Оптимизированная команда запуска
+CMD ["sh", "-c", "python main.py"]

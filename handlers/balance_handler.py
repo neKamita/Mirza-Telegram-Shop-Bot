@@ -71,10 +71,6 @@ class BalanceHandler(BaseHandler):
             balance_data = await self.balance_service.get_user_balance(user_id)
 
             if balance_data:
-                balance = balance_data.get("balance", 0)
-                currency = balance_data.get("currency", "TON")
-                source = balance_data.get("source", "unknown")
-
                 builder = InlineKeyboardBuilder()
                 builder.row(
                     InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="recharge"),
@@ -84,17 +80,8 @@ class BalanceHandler(BaseHandler):
                     InlineKeyboardButton(text="⬅️ Вернуться в меню", callback_data="back_to_main")
                 )
 
-                balance_message = (
-                    f"💰 <b>Ваш баланс</b> 💰\n\n"
-                    f"⭐ <b>{balance:.2f} {currency}</b>\n"
-                    f"📊 <i>Источник: {source}</i>\n\n"
-                    f"🎯 <i>Используйте звезды для различных функций внутри бота!</i>\n\n"
-                    f"✨ <i>Доступные действия:</i>\n"
-                    f"   • Покупка дополнительных звезд\n"
-                    f"   • Доступ к премиум-функциям\n"
-                    f"   • Улучшение пользовательского опыта\n\n"
-                    f"💎 <i>Каждая звезда имеет ценность!</i>"
-                )
+                # Заменяем ручное форматирование на централизованный метод
+                balance_message = await self.balance_service.get_balance_message(user_id)
 
                 if message:
                     try:
@@ -208,7 +195,7 @@ class BalanceHandler(BaseHandler):
         message = message_or_callback.message if is_callback else message_or_callback
 
         try:
-            # Получаем историю баланса
+            # Проверяем наличие истории транзакций
             history_data = await self.balance_service.get_user_balance_history(user_id, days=30)
 
             if not history_data or history_data.get("transactions_count", 0) == 0:
@@ -246,98 +233,8 @@ class BalanceHandler(BaseHandler):
                         )
                 return
 
-            # Форматируем сообщение
-            initial_balance = history_data.get("initial_balance", 0)
-            final_balance = history_data.get("final_balance", 0)
-            transactions_count = history_data.get("transactions_count", 0)
-
-            # Рассчитываем изменение баланса
-            balance_change = final_balance - initial_balance
-            if balance_change > 0:
-                change_text = f"+{balance_change:.2f} TON"
-                change_icon = "📈"
-            elif balance_change < 0:
-                change_text = f"{balance_change:.2f} TON"
-                change_icon = "📉"
-            else:
-                change_text = f"0.00 TON"
-                change_icon = "➖"
-
-            message_text = (
-                f"📊 <b>История баланса за 30 дней</b> 📊\n\n"
-                f"💰 <b>Начальный баланс:</b> {initial_balance:.2f} TON\n"
-                f"💰 <b>Текущий баланс:</b> {final_balance:.2f} TON\n"
-                f"{change_icon} <b>Изменение:</b> {change_text}\n"
-                f"📈 <b>Всего транзакций:</b> {transactions_count}\n\n"
-                f"🔄 <b>Последние операции:</b>\n\n"
-            )
-
-            # Добавляем последние 5 транзакций
-            transactions = history_data.get("transactions", [])[:5]
-            for i, transaction in enumerate(transactions, 1):
-                transaction_type = transaction.get("transaction_type", "unknown")
-                amount = transaction.get("amount", 0)
-                status = transaction.get("status", "unknown")
-                created_at = transaction.get("created_at", "")
-
-                # Форматируем дату
-                if created_at:
-                    try:
-                        from datetime import datetime
-                        dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                        date_str = dt.strftime("%d.%m.%Y %H:%M")
-                    except:
-                        date_str = created_at
-                else:
-                    date_str = "N/A"
-
-                # Определяем иконку и знак операции на основе типа транзакции
-                if transaction_type == "purchase":
-                    icon = "🛒"
-                    sign = "-"
-                    operation_name = "Покупка"
-                elif transaction_type == "refund":
-                    icon = "💰"
-                    sign = "+"
-                    operation_name = "Возврат"
-                elif transaction_type == "bonus":
-                    icon = "🎁"
-                    sign = "+"
-                    operation_name = "Бонус"
-                elif transaction_type == "recharge":
-                    icon = "💳"
-                    sign = "+"
-                    operation_name = "Пополнение"
-                elif transaction_type == "withdrawal":
-                    icon = "💸"
-                    sign = "-"
-                    operation_name = "Списание"
-                else:
-                    # Для неизвестных типов пытаемся определить по сумме
-                    if amount > 0:
-                        icon = "💰"
-                        sign = "+"
-                        operation_name = "Пополнение"
-                    else:
-                        icon = "💸"
-                        sign = "-"
-                        operation_name = "Списание"
-
-                # Определяем статус с более понятными названиями
-                if status == "completed":
-                    status_text = "✅ Выполнено"
-                elif status == "failed":
-                    status_text = "❌ Ошибка"
-                elif status == "pending":
-                    status_text = "⏳ В обработке"
-                elif status == "cancelled":
-                    status_text = "🚫 Отменено"
-                else:
-                    status_text = "⚪ Неизвестно"
-
-                # Форматируем строку транзакции с улучшенным отображением
-                message_text += f"{i}. {icon} <b>{operation_name}</b> {sign}{amount:.2f} TON\n"
-                message_text += f"   {status_text} • {date_str}\n\n"
+            # Используем централизованное форматирование истории транзакций
+            message_text = await self.balance_service.get_transaction_history_message(user_id, days=30)
 
             builder = InlineKeyboardBuilder()
             builder.row(

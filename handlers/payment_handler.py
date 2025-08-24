@@ -30,9 +30,7 @@ class PaymentHandler(BaseHandler):
         self.logger = logging.getLogger(__name__)
         self.error_handler = ErrorHandler(*args, **kwargs)
 
-    def _format_payment_status(self, status: str) -> str:
-        """Форматирование статуса оплаты с использованием MessageTemplate"""
-        return MessageTemplate._format_status(status)
+    # Метод _format_payment_status удален - используйте payment_service.get_payment_status_message()
 
     async def show_recharge_menu(self, message_or_callback: Union[Message, CallbackQuery], bot: Bot, amount: Optional[float] = None) -> None:
         """
@@ -178,9 +176,8 @@ class PaymentHandler(BaseHandler):
                     
                     for line in lines:
                         if 'статус:' in line.lower():
-                            # Заменяем строку статуса с добавлением времени
-                            current_time = datetime.now().strftime("%H:%M:%S")
-                            new_status = f"⏳ <b>статус: pending ({current_time})</b>"
+                            # Используем централизованный метод для форматирования статуса
+                            new_status = self.payment_service.get_payment_status_message(payment_status, amount, payment_id, currency)
                             new_lines.append(new_status)
                             status_found = True
                         else:
@@ -192,15 +189,13 @@ class PaymentHandler(BaseHandler):
                         for i, line in enumerate(new_lines):
                             if 'ID транзакции:' in line or 'ID платежа:' in line:
                                 new_lines.insert(i + 1, "")
-                                current_time = datetime.now().strftime("%H:%M:%S")
-                                new_status = f"⏳ <b>статус: pending ({current_time})</b>"
+                                new_status = self.payment_service.get_payment_status_message(payment_status, amount, payment_id, currency)
                                 new_lines.insert(i + 2, new_status)
                                 break
                         else:
                             # Если не нашли, добавляем в конец
                             new_lines.append("")
-                            current_time = datetime.now().strftime("%H:%M:%S")
-                            new_status = f"⏳ <b>статус: pending ({current_time})</b>"
+                            new_status = self.payment_service.get_payment_status_message(payment_status, amount, payment_id, currency)
                             new_lines.append(new_status)
                     
                     updated_text = '\n'.join(new_lines)
@@ -324,7 +319,7 @@ class PaymentHandler(BaseHandler):
             if message:
                 try:
                     # Добавляем статус оплаты в сообщение
-                    status_line = self._format_payment_status("pending")
+                    status_line = self.payment_service.get_payment_status_message("pending", amount, None)
                     
                     if is_callback:
                         await message.edit_text(
@@ -353,7 +348,7 @@ class PaymentHandler(BaseHandler):
                 except Exception as e:
                     self.logger.error(f"Error editing/answering message in handle_recharge_amount success case: {e}")
                     # В случае ошибки редактирования, отправляем новое сообщение со статусом
-                    status_line = self._format_payment_status("pending")
+                    status_line = self.payment_service.get_payment_status_message("pending", amount, None)
                     await message.answer(
                         f"✅ Создан счет на пополнение баланса на {amount} TON.\n\n"
                         f"💳 Ссылка на оплату: {result['url']}\n\n"
@@ -434,14 +429,8 @@ class PaymentHandler(BaseHandler):
                 try:
                     if callback.message:
                         await callback.message.edit_text(
-                            "❌ <b>Инвойс отменен</b> ❌\n\n"
-                            "💳 <b>Выберите сумму для пополнения</b> 💳\n\n"
-                            "🎯 <i>Доступные варианты:</i>\n\n"
-                            f"💰 <i>10 TON - Минимальное пополнение</i>\n"
-                            f"💰 <i>50 TON - Стандартное пополнение</i>\n"
-                            f"💰 <i>100 TON - Комфортное пополнение</i>\n"
-                            f"💰 <i>500 TON - Максимальное пополнение</i>\n\n"
-                            f"✨ <i>Выберите удобную для вас сумму</i>",
+                            "❌ <b>Инвойс отменен</b> ❌\n\n" +
+                            MessageTemplate.get_payment_menu_title(),
                             reply_markup=builder.as_markup(),
                             parse_mode="HTML"
                         )
@@ -477,7 +466,7 @@ class PaymentHandler(BaseHandler):
         """
         # Обработка сообщений о пополнении
         if message.text and ("пополнение" in message.text.lower() or "recharge" in message.text.lower()):
-            await self.create_recharge(message, bot)
+            await self.show_recharge_menu(message, bot)
         else:
             await message.answer("❓ <b>Неизвестная команда</b> ❓\n\n"
                                "🔍 <i>Пожалуйста, используйте доступные команды</i>\n\n"
@@ -517,13 +506,7 @@ class PaymentHandler(BaseHandler):
             try:
                 if callback.message:
                     await callback.message.edit_text(
-                        "💳 <b>Выберите сумму для пополнения</b> 💳\n\n"
-                        "🎯 <i>Доступные варианты:</i>\n\n"
-                        f"💰 <i>10 TON - Минимальное пополнение</i>\n"
-                        f"💰 <i>50 TON - Стандартное пополнение</i>\n"
-                        f"💰 <i>100 TON - Комфортное пополнение</i>\n"
-                        f"💰 <i>500 TON - Максимальное пополнение</i>\n\n"
-                        f"✨ <i>Выберите удобную для вас сумму</i>",
+                        MessageTemplate.get_payment_menu_title(),
                         reply_markup=builder.as_markup(),
                         parse_mode="HTML"
                     )
@@ -542,7 +525,7 @@ class PaymentHandler(BaseHandler):
             amount = float(callback.data.replace("recharge_", ""))
             await self.create_recharge(callback, bot, amount)
         elif callback.data == "back_to_recharge":
-            await self.create_recharge(callback, bot)
+            await self.show_recharge_menu(callback, bot)
         elif callback.data == "recharge_custom":
             # Отменяем все pending пополнения пользователя при возврате в меню
             try:
@@ -569,13 +552,7 @@ class PaymentHandler(BaseHandler):
             try:
                 if callback.message:
                     await callback.message.edit_text(
-                        "💳 <b>Выберите сумму для пополнения</b> 💳\n\n"
-                        "🎯 <i>Доступные варианты:</i>\n\n"
-                        f"💰 <i>10 TON - Минимальное пополнение</i>\n"
-                        f"💰 <i>50 TON - Стандартное пополнение</i>\n"
-                        f"💰 <i>100 TON - Комфортное пополнение</i>\n"
-                        f"💰 <i>500 TON - Максимальное пополнение</i>\n\n"
-                        f"✨ <i>Выберите удобную для вас сумму</i>",
+                        MessageTemplate.get_payment_menu_title(),
                         reply_markup=builder.as_markup(),
                         parse_mode="HTML"
                     )

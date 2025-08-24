@@ -1,0 +1,257 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+  labels:
+    app: alertmanager
+data:
+  alertmanager.yml: |
+    global:
+      smtp_smarthost: 'smtp.gmail.com:587'
+      smtp_from: 'alerts@telegram-bot.com'
+      smtp_auth_username: '${SMTP_USER}'
+      smtp_auth_password: '${SMTP_PASSWORD}'
+      smtp_require_tls: true
+
+    templates:
+    - '/etc/alertmanager/templates/*.tmpl'
+
+    route:
+      group_by: ['alertname']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
+      receiver: 'telegram-team'
+      routes:
+      - match:
+          severity: critical
+        receiver: 'telegram-critical'
+        group_wait: 5s
+        group_interval: 5s
+        repeat_interval: 30m
+      - match:
+          severity: warning
+        receiver: 'telegram-warning'
+        group_wait: 30s
+        group_interval: 30s
+        repeat_interval: 1h
+      - match:
+          service: redis
+        receiver: 'redis-alerts'
+      - match:
+          service: database
+        receiver: 'db-alerts'
+
+    receivers:
+    - name: 'telegram-team'
+      slack_configs:
+      - api_url: '${SLACK_WEBHOOK}'
+        channel: '#alerts'
+        title: '{{ .GroupLabels.alertname }}'
+        text: |-
+          {{ range .Alerts }}
+          *{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          {{ end }}
+        send_resolved: true
+
+      email_configs:
+      - to: 'devops@telegram-bot.com'
+        subject: 'Alert: {{ .GroupLabels.alertname }}'
+        body: |-
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          {{ end }}
+
+    - name: 'telegram-critical'
+      slack_configs:
+      - api_url: '${SLACK_WEBHOOK}'
+        channel: '#critical-alerts'
+        title: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
+        text: |-
+          {{ range .Alerts }}
+          *{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          Runbook: Check incident response playbook
+          {{ end }}
+        send_resolved: true
+
+      pagerduty_configs:
+      - service_key: '${PAGERDUTY_KEY}'
+        description: '{{ .Annotations.summary }}'
+        severity: 'critical'
+
+    - name: 'telegram-warning'
+      slack_configs:
+      - api_url: '${SLACK_WEBHOOK}'
+        channel: '#warnings'
+        title: '⚠️ WARNING: {{ .GroupLabels.alertname }}'
+        text: |-
+          {{ range .Alerts }}
+          *{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          {{ end }}
+        send_resolved: true
+
+    - name: 'redis-alerts'
+      slack_configs:
+      - api_url: '${SLACK_WEBHOOK}'
+        channel: '#infrastructure'
+        title: '🔴 Redis Alert: {{ .GroupLabels.alertname }}'
+        text: |-
+          {{ range .Alerts }}
+          *{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          Check Redis cluster status and consider failover procedures
+          {{ end }}
+        send_resolved: true
+
+    - name: 'db-alerts'
+      slack_configs:
+      - api_url: '${SLACK_WEBHOOK}'
+        channel: '#infrastructure'
+        title: '🗄️ Database Alert: {{ .GroupLabels.alertname }}'
+        text: |-
+          {{ range .Alerts }}
+          *{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          Check database connectivity and backup status
+          {{ end }}
+        send_resolved: true
+
+    inhibit_rules:
+    - source_match:
+        severity: 'critical'
+      target_match:
+        severity: 'warning'
+      equal: ['alertname', 'service']
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: monitoring
+  labels:
+    app: alertmanager
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+    spec:
+      serviceAccountName: alertmanager
+      securityContext:
+        fsGroup: 2000
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+      - name: alertmanager
+        image: prom/alertmanager:latest
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        args:
+        - --config.file=/etc/alertmanager/alertmanager.yml
+        - --storage.path=/alertmanager/
+        - --web.listen-address=:9093
+        - --cluster.listen-address=
+        ports:
+        - containerPort: 9093
+          name: web
+        env:
+        - name: SMTP_USER
+          valueFrom:
+            secretKeyRef:
+              name: alertmanager-secret
+              key: smtp_user
+        - name: SMTP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: alertmanager-secret
+              key: smtp_password
+        - name: SLACK_WEBHOOK
+          valueFrom:
+            secretKeyRef:
+              name: alertmanager-secret
+              key: slack_webhook
+        - name: PAGERDUTY_KEY
+          valueFrom:
+            secretKeyRef:
+              name: alertmanager-secret
+              key: pagerduty_key
+        volumeMounts:
+        - name: config
+          mountPath: /etc/alertmanager
+          readOnly: true
+        - name: templates
+          mountPath: /etc/alertmanager/templates
+          readOnly: true
+        - name: alertmanager-storage
+          mountPath: /alertmanager
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /-/healthy
+            port: 9093
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /-/ready
+            port: 9093
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: config
+        configMap:
+          name: alertmanager-config
+      - name: templates
+        configMap:
+          name: alertmanager-templates
+      - name: alertmanager-storage
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: monitoring
+  labels:
+    app: alertmanager
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9093
+    targetPort: 9093
+    protocol: TCP
+    name: web
+  selector:
+    app: alertmanager
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alertmanager
+  namespace: monitoring
