@@ -435,7 +435,7 @@ async def health_check():
         return JSONResponse(
             content={
                 "status": "unhealthy",
-                "error": str(e),
+                "error": "Внутренняя ошибка сервера",
                 "domain": settings.production_domain,
                 "timestamp": datetime.utcnow().isoformat()
             },
@@ -470,7 +470,7 @@ async def detailed_health_check():
         return JSONResponse(
             content={
                 "status": "unhealthy",
-                "error": str(e),
+                "error": "Внутренняя ошибка сервера",
                 "timestamp": datetime.utcnow().isoformat()
             },
             status_code=503
@@ -495,7 +495,10 @@ async def metrics():
     except Exception as e:
         logger.error("Metrics endpoint failed", extra={"error": str(e)}, exc_info=True)
         return JSONResponse(
-            content=f"Error generating metrics: {str(e)}",
+            content={
+                "error": "Внутренняя ошибка сервера",
+                "message": "Не удалось сгенерировать метрики"
+            },
             status_code=500
         )
 
