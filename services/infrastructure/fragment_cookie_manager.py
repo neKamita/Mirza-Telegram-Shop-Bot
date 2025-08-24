@@ -20,12 +20,12 @@ try:
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.common.exceptions import TimeoutException, WebDriverException
-    from chromedriver_py import binary_path
+    from webdriver_manager.chrome import ChromeDriverManager
     SELENIUM_AVAILABLE = True
-    CHROMEDRIVER_PY_AVAILABLE = True
+    WEBDRIVER_MANAGER_AVAILABLE = True
 except ImportError:
     SELENIUM_AVAILABLE = False
-    CHROMEDRIVER_PY_AVAILABLE = False
+    WEBDRIVER_MANAGER_AVAILABLE = False
     logging.warning("Selenium not available, automatic cookie refresh will be disabled")
 
 
@@ -35,8 +35,13 @@ class FragmentCookieManager:
     def __init__(self, fragment_service):
         self.fragment_service = fragment_service
         self.logger = logging.getLogger(__name__)
-        self.cookies_file = Path("fragment_cookies.json")
+        # Используем /app/cookies для персистентного хранения в read-only контейнерах
+        self.cookies_dir = Path("/app/cookies")
+        self.cookies_file = self.cookies_dir / "fragment_cookies.json"
         self.cookie_refresh_interval = int(os.getenv("FRAGMENT_COOKIE_REFRESH_INTERVAL", "3600"))  # 1 час по умолчанию
+
+        # Убеждаемся, что директория существует
+        self.cookies_dir.mkdir(parents=True, exist_ok=True)
         
     async def get_fragment_cookies(self) -> Optional[str]:
         """
@@ -108,10 +113,10 @@ class FragmentCookieManager:
         if not SELENIUM_AVAILABLE:
             self.logger.warning("Selenium not available, cannot refresh cookies automatically")
             return None
-            
+
         try:
             self.logger.info("Refreshing Fragment cookies...")
-            
+
             # Настройка headless браузера
             chrome_options = Options()
             chrome_options.add_argument("--headless")
@@ -119,14 +124,30 @@ class FragmentCookieManager:
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--window-size=1920,1080")
+
+            # Настройки для работы в read-only контейнере
+            chrome_options.add_argument("--user-data-dir=/tmp/chrome-profile")
+            chrome_options.add_argument("--data-path=/tmp/chrome-data")
+            chrome_options.add_argument("--disk-cache-dir=/tmp/chrome-cache")
+            chrome_options.add_argument("--remote-debugging-port=9222")
+            chrome_options.add_argument("--disable-background-timer-throttling")
+            chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+            chrome_options.add_argument("--disable-renderer-backgrounding")
+
+            # Убедимся, что директории существуют
+            import os
+            os.makedirs("/tmp/chrome-profile", exist_ok=True)
+            os.makedirs("/tmp/chrome-data", exist_ok=True)
+            os.makedirs("/tmp/chrome-cache", exist_ok=True)
+            chrome_options.add_argument("--disable-features=VizDisplayCompositor")
             
-            # Создаем драйвер с учетом разных способов установки chromedriver
-            if CHROMEDRIVER_PY_AVAILABLE and binary_path:
-                # Используем chromedriver-py
-                service = ChromeService(executable_path=binary_path)
+            # Создаем драйвер с webdriver-manager для автоматического управления версиями
+            if WEBDRIVER_MANAGER_AVAILABLE:
+                # Используем webdriver-manager для автоматического управления ChromeDriver
+                service = ChromeService(ChromeDriverManager().install())
                 driver = webdriver.Chrome(service=service, options=chrome_options)
             else:
-                # Используем системный chromedriver
+                # Резервный вариант - используем системный chromedriver
                 driver_path = os.getenv("CHROMEDRIVER_PATH", "/usr/local/bin/chromedriver")
                 service = ChromeService(executable_path=driver_path)
                 driver = webdriver.Chrome(service=service, options=chrome_options)

@@ -30,85 +30,34 @@ async def init_database():
 
 
 async def init_cache_services():
-    """Инициализация сервисов кэширования"""
+    """Инициализация сервисов кэширования с использованием унифицированного менеджера"""
     cache_services = {}
 
-    # Инициализация Redis кэша
-    if settings.redis_url:
+    # Инициализация Redis кэша с использованием унифицированной функции
+    if settings.redis_url or (settings.is_redis_cluster and settings.redis_cluster_nodes):
         try:
-            import redis.asyncio as redis
-            from redis.cluster import RedisCluster
-            from typing import Union
-            from services.cache import UserCache
-            from services.cache import PaymentCache
-            from services.cache import SessionCache
-            from services.cache import RateLimitCache
+            from core.cache.cache_manager import initialize_cache_services
 
-            # Создаем Redis клиент с поддержкой кластера
-            if settings.is_redis_cluster:
-                startup_nodes = [
-                    {"host": host.split(":")[0], "port": int(host.split(":")[1])}
-                    for host in settings.redis_cluster_nodes.split(",")
-                ]
-                logging.info(f"Creating RedisCluster with {len(startup_nodes)} nodes")
+            # Используем унифицированную функцию для инициализации Redis
+            cache_services = await initialize_cache_services(
+                redis_url=settings.redis_url,
+                redis_cluster_nodes=settings.redis_cluster_nodes,
+                redis_password=settings.redis_password,
+                is_redis_cluster=settings.is_redis_cluster,
+                decode_responses=True,  # Устанавливаем decode_responses=True для согласованности
+                socket_timeout=settings.redis_socket_timeout,
+                socket_connect_timeout=settings.redis_socket_connect_timeout,
+                retry_on_timeout=settings.redis_retry_on_timeout,
+                max_connections=settings.redis_max_connections,
+                health_check_interval=settings.redis_health_check_interval
+            )
 
-                # Используем правильный формат для RedisCluster
-                from redis.cluster import RedisCluster
-                from redis.cluster import ClusterNode
+            logging.info("Cache services initialized successfully using unified manager")
 
-                # Создаем корректные узлы кластера
-                cluster_nodes = [ClusterNode(host=host.split(":")[0], port=int(host.split(":")[1]))
-                               for host in settings.redis_cluster_nodes.split(",")]
-
-                redis_client = RedisCluster(
-                    startup_nodes=cluster_nodes,
-                    password=settings.redis_password,
-                    decode_responses=True,  # Изменено на True для согласованности
-                    skip_full_coverage_check=True
-                )
-            else:
-                logging.info(f"Creating Redis client from URL: {settings.redis_url}")
-                redis_client = redis.from_url(settings.redis_url, decode_responses=True)  # Изменено на True для согласованности
-
-            # Проверка подключения
-            logging.info(f"Redis client type: {type(redis_client)}")
-
-            if hasattr(redis_client, 'ping'):
-                if asyncio.iscoroutinefunction(redis_client.ping):
-                    logging.info("Using async ping method")
-                    try:
-                        await redis_client.ping()
-                        logging.info("Redis ping successful")
-                    except Exception as e:
-                        logging.error(f"Redis ping failed: {e}")
-                        raise
-                else:
-                    logging.info("Using sync ping method")
-                    try:
-                        result = redis_client.ping()
-                        logging.info(f"Redis ping result: {result}")
-                    except Exception as e:
-                        logging.error(f"Redis ping failed: {e}")
-                        raise
-            else:
-                logging.warning("Redis client does not have ping method")
-
-            # Создаем кеш пользователей
-            cache_services['user_cache'] = UserCache(redis_client)
-
-            # Создаем кеш платежей
-            cache_services['payment_cache'] = PaymentCache(redis_client)
-
-            # Создаем кеш сессий
-            cache_services['session_cache'] = SessionCache(redis_client)
-
-            # Создаем кеш для rate limiting
-            cache_services['rate_limit_cache'] = RateLimitCache(redis_client)
-
-            logging.info("Cache services initialized successfully")
         except Exception as e:
             logging.error(f"Failed to initialize cache services: {e}")
             # Продолжаем работу без кеша
+            logging.warning("Application will continue without cache functionality")
 
     return cache_services
 

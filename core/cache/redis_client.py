@@ -10,6 +10,7 @@
 
 import asyncio
 import logging
+import inspect
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 import redis.asyncio as redis
@@ -19,6 +20,42 @@ from .exceptions import CacheConnectionError, CacheTimeoutError, CacheClusterErr
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ClusterNode:
+    """
+    Класс узла Redis кластера, совместимый с RedisCluster API.
+
+    Этот класс обеспечивает совместимость с redis-py RedisCluster,
+    предоставляя все необходимые атрибуты, которые ожидает RedisCluster
+    при работе с узлами кластера.
+
+    Основные атрибуты:
+    - host, port: адрес узла
+    - name: уникальное имя узла
+    - redis_connection: соединение Redis (используется RedisCluster)
+    - server_type: тип сервера для совместимости
+    - max_connections: максимальное количество соединений
+    - connection_class: класс соединения
+    """
+
+    host: str
+    port: int
+    name: Optional[str] = None
+    redis_connection: Optional[Any] = None
+    server_type: Optional[str] = None
+    max_connections: int = 20
+    connection_class: Optional[Any] = None
+
+    def __post_init__(self):
+        """Инициализация после создания объекта"""
+        if self.name is None:
+            self.name = f"{self.host}:{self.port}"
+
+        # Убеждаемся, что redis_connection инициализирован
+        if self.redis_connection is None:
+            self.redis_connection = None
 
 
 @dataclass
@@ -142,16 +179,46 @@ class RedisClient:
 
         self._client = redis.Redis(**connection_params)
 
-        # Тестовое подключение
-        await self._client.ping()
+        # Тестовое подключение - исправлено для поддержки синхронного клиента
+        await self._ping_client()
 
     async def _connect_cluster(self) -> None:
         """Подключение к Redis кластеру"""
         if not self.config.cluster_nodes:
             raise CacheClusterError("No cluster nodes configured")
 
+        # Конвертируем словари в объекты ClusterNode для RedisCluster
+        # Используем глобальный класс ClusterNode, совместимый с RedisCluster API
+        startup_nodes = []
+        for node in self.config.cluster_nodes:
+            if isinstance(node, dict):
+                host = node.get('host') or node.get('ip', 'localhost')
+                port = node.get('port', 6379)
+                name = node.get('name', f"{host}:{port}")
+                # Приводим к правильным типам
+                host_str = str(host)
+                port_int = int(port)
+                name_str = str(name)
+                # Создаем объект ClusterNode с требуемыми атрибутами
+                node_obj = ClusterNode(
+                    host=host_str,
+                    port=port_int,
+                    name=name_str,
+                    redis_connection=None,
+                    server_type=None,
+                    max_connections=self.config.max_connections,
+                    connection_class=None
+                )
+                startup_nodes.append(node_obj)
+            elif hasattr(node, 'host') and hasattr(node, 'port'):
+                startup_nodes.append(node)
+            else:
+                raise ValueError(f"Invalid cluster node format: {node}")
+
+        logger.info(f"Redis cluster nodes configured successfully: {[f'{node.host}:{node.port}' for node in startup_nodes]}")
+
         connection_params = {
-            'startup_nodes': self.config.cluster_nodes,
+            'startup_nodes': startup_nodes,
             'password': self.config.password,
             'decode_responses': self.config.decode_responses,
             'socket_connect_timeout': self.config.socket_connect_timeout,
@@ -170,16 +237,43 @@ class RedisClient:
 
         self._client = RedisCluster(**connection_params)
 
-        # Тестовое подключение
-        await self._client.ping()
+        # Тестовое подключение - исправлено для поддержки кластерного клиента
+        await self._ping_client()
+
+    async def _ping_client(self) -> None:
+        """Безопасный ping для любого типа клиента"""
+        if self._client is None:
+            raise CacheConnectionError("Redis client is not initialized")
+
+        try:
+            # Всегда используем asyncio.to_thread для безопасности
+            # Это работает для всех типов Redis клиентов
+            def sync_ping():
+                if self._client is not None:
+                    return self._client.ping()
+                return False
+
+            await asyncio.to_thread(sync_ping)
+        except Exception as e:
+            logger.error(f"Failed to ping Redis client: {e}")
+            raise
 
     async def disconnect(self) -> None:
         """Отключение от Redis"""
         async with self._lock:
             if self._client:
-                if hasattr(self._client, 'close'):
-                    await self._client.close()
-                self._client = None
+                try:
+                    # Для RedisCluster close() возвращает awaitable
+                    if isinstance(self._client, RedisCluster):
+                        await self._client.close()  # type: ignore
+                    else:
+                        # Для обычного redis.Redis close() синхронный, используем asyncio.to_thread
+                        if self._client is not None:
+                            await asyncio.to_thread(self._client.close)
+                except Exception as e:
+                    logger.warning(f"Error during Redis client disconnect: {e}")
+                finally:
+                    self._client = None
             self._is_connected = False
             logger.info("Disconnected from Redis")
 
@@ -212,8 +306,8 @@ class RedisClient:
                 # Получаем метод Redis клиента
                 method = getattr(self._client, operation)
 
-                # Проверяем, является ли метод асинхронным
-                if asyncio.iscoroutinefunction(method):
+                # Проверяем, является ли метод асинхронным или возвращает awaitable
+                if asyncio.iscoroutinefunction(method) or isinstance(self._client, RedisCluster):
                     result = await method(*args, **kwargs)
                 else:
                     # Для синхронного метода используем asyncio.to_thread
@@ -260,7 +354,7 @@ class RedisClient:
                     else:
                         raise CacheClusterError(
                             f"Redis cluster operation failed: {e}",
-                            cluster_info=self.config.cluster_nodes
+                            cluster_info={"nodes": self.config.cluster_nodes}
                         ) from e
                 else:
                     # Для других ошибок не делаем повторные попытки
@@ -268,7 +362,10 @@ class RedisClient:
                     raise
 
         # Если дошли сюда, значит все попытки исчерпаны
-        raise last_error
+        if last_error:
+            raise last_error
+        else:
+            raise CacheConnectionError("All retry attempts failed with unknown error")
 
     async def _ensure_healthy_connection(self) -> None:
         """Проверка здоровья соединения"""
@@ -280,7 +377,7 @@ class RedisClient:
         current_time = asyncio.get_event_loop().time()
         if current_time - self._last_health_check > self.config.health_check_interval:
             try:
-                await self._client.ping()
+                await self._ping_client()
                 self._last_health_check = current_time
             except Exception as e:
                 logger.warning(f"Health check failed: {e}")
@@ -302,7 +399,7 @@ class RedisClient:
         """Проверка доступности Redis"""
         try:
             if self._client:
-                await self._client.ping()
+                await self._ping_client()
                 return True
             return False
         except Exception:

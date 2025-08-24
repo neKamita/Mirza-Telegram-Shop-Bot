@@ -245,36 +245,38 @@ async def initialize_services():
         user_repository = UserRepository(database_url=settings.database_url)
         await user_repository.create_tables()
 
-        # Инициализация Redis кеша
+        # Инициализация Redis кеша с использованием унифицированного менеджера
         redis_client = None
         user_cache = None
         payment_cache = None
 
-        if settings.redis_url:
+        if settings.redis_url or (settings.is_redis_cluster and settings.redis_cluster_nodes):
             try:
-                import redis.asyncio as redis
-                from redis.cluster import RedisCluster
+                from core.cache.cache_manager import initialize_cache_services
 
-                if settings.is_redis_cluster:
-                    startup_nodes = [
-                        {"host": host.split(":")[0], "port": int(host.split(":")[1])}
-                        for host in settings.redis_cluster_nodes.split(",")
-                    ]
-                    redis_client = RedisCluster(
-                        startup_nodes=startup_nodes,
-                        password=settings.redis_password,
-                        decode_responses=False,
-                        skip_full_coverage_check=True
-                    )
-                else:
-                    redis_client = redis.from_url(settings.redis_url, decode_responses=False)
+                # Используем унифицированную функцию для инициализации Redis
+                cache_services = await initialize_cache_services(
+                    redis_url=settings.redis_url,
+                    redis_cluster_nodes=settings.redis_cluster_nodes,
+                    redis_password=settings.redis_password,
+                    is_redis_cluster=settings.is_redis_cluster,
+                    decode_responses=True,  # Устанавливаем decode_responses=True для согласованности
+                    socket_timeout=settings.redis_socket_timeout,
+                    socket_connect_timeout=settings.redis_socket_connect_timeout,
+                    retry_on_timeout=settings.redis_retry_on_timeout,
+                    max_connections=settings.redis_max_connections,
+                    health_check_interval=settings.redis_health_check_interval
+                )
 
-                await redis_client.ping()
-                user_cache = UserCache(redis_client)
-                payment_cache = PaymentCache(redis_client)
-                logger.info("Redis cache initialized successfully")
+                redis_client = cache_services['redis_client']
+                user_cache = cache_services['user_cache']
+                payment_cache = cache_services['payment_cache']
+
+                logger.info("Redis cache initialized successfully using unified manager")
+
             except Exception as e:
                 logger.error("Failed to initialize Redis cache", extra={"error": str(e)})
+                logger.warning("Webhook services will continue without cache functionality")
 
         # Инициализация сервисов
         balance_repository = BalanceRepository(user_repository.async_session)

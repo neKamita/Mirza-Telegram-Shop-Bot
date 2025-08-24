@@ -1,5 +1,5 @@
 # Multi-stage build для оптимизации размера образа
-FROM python:3.11-slim AS base
+FROM python:3.13-slim AS base
 
 # Установка системных зависимостей для сборки
 FROM base AS builder
@@ -33,12 +33,19 @@ RUN apt-get update && apt-get install -y \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Установка Chrome только если требуется Fragment функциональность
+# Установка Chrome и ChromeDriver только если требуется Fragment функциональность
 RUN if [ "$FRAGMENT_AUTO_COOKIE_REFRESH" = "true" ]; then \
     wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /etc/apt/trusted.gpg.d/google-archive.gpg && \
     echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list && \
     apt-get update && \
     apt-get install -y google-chrome-stable && \
+    # Установка ChromeDriver
+    CHROMEDRIVER_VERSION=$(curl -sS chromedriver.storage.googleapis.com/LATEST_RELEASE) && \
+    wget -O /tmp/chromedriver.zip http://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip && \
+    unzip /tmp/chromedriver.zip chromedriver -d /tmp/ && \
+    mv /tmp/chromedriver /usr/local/bin/chromedriver && \
+    chmod +x /usr/local/bin/chromedriver && \
+    rm /tmp/chromedriver.zip && \
     rm -rf /var/lib/apt/lists/*; \
     fi
 
