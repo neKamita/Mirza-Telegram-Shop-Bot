@@ -96,6 +96,7 @@ async def main():
 
     logging.info("Starting application initialization...")
     logging.info(f"Production domain configured: {settings.production_domain}")
+    logging.info(f"Webhook domain configured: {settings.webhook_domain}")
     logging.info(f"Webhook host: {settings.webhook_host}:{settings.webhook_port}")
     logging.info(f"Environment: {settings.environment}")
     logging.info(f"Debug mode: {settings.debug}")
@@ -194,10 +195,10 @@ async def main():
     # Запуск сервисов параллельно
     if settings.balance_service_enabled and settings.webhook_enabled:
         logging.info(f"Starting webhook server on {settings.webhook_host}:{settings.webhook_port}")
-        logging.info(f"Webhook endpoint: https://{settings.production_domain}/webhook/heleket")
-        logging.info(f"Health check endpoint: https://{settings.production_domain}/health")
-        logging.info(f"Detailed health check: https://{settings.production_domain}/health/detailed")
-        logging.info(f"Metrics endpoint: https://{settings.production_domain}/metrics")
+        logging.info(f"Webhook endpoint: https://{settings.webhook_domain}/webhook/heleket")
+        logging.info(f"Health check endpoint: https://{settings.webhook_domain}/health")
+        logging.info(f"Detailed health check: https://{settings.webhook_domain}/health/detailed")
+        logging.info(f"Metrics endpoint: https://{settings.webhook_domain}/metrics")
 
         # Запуск webhook сервера и Telegram бота параллельно
         await asyncio.gather(

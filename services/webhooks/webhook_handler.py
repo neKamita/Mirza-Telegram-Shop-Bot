@@ -39,12 +39,12 @@ class WebhookHandler:
                 client_host = getattr(request.client, 'host', 'unknown') if request.client else 'unknown'
                 logger.info(f"Webhook domain debug - Client: {client_host}")
                 logger.info(f"Webhook domain debug - Host header: {headers.get('host', 'unknown')}")
-                logger.info(f"Webhook domain debug - Expected domain: {settings.production_domain}")
+                logger.info(f"Webhook domain debug - Expected domain: {settings.webhook_domain}")
                 logger.info(f"Webhook domain debug - User-Agent: {headers.get('user-agent', 'unknown')}")
 
 
             # Валидация подписи
-            if not await self._validate_webhook_signature(body, request.headers):
+            if not await self._validate_webhook_signature(body, dict(request.headers)):
                 self.logger.error("Invalid webhook signature")
                 return JSONResponse(
                     {"status": "error", "message": "Invalid signature"},
@@ -84,7 +84,7 @@ class WebhookHandler:
             )
 
     async def _validate_webhook_signature(self, body: bytes, headers: Dict[str, str]) -> bool:
-        """Валидация подписи вебхука от Heleket с использованием HMAC SHA256"""
+        """Валидация подписи вебхука от Heleket с использованием HMAC MD5"""
         try:
             from config.settings import settings
             webhook_secret = settings.webhook_secret
@@ -139,7 +139,7 @@ class WebhookHandler:
         signature = hmac.new(
             secret_key,
             body,
-            hashlib.sha256
+            hashlib.md5
         ).hexdigest()
 
         return signature

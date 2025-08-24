@@ -6,14 +6,14 @@ import json
 import logging
 from typing import Dict, Any, Set, Optional
 from datetime import datetime
-import redis.asyncio as redis
+from core.cache.redis_client import RedisClient
 from services.cache.session_cache import SessionCache
 
 
 class WebSocketService:
     """Сервис для управления WebSocket соединениями и real-time уведомлениями"""
 
-    def __init__(self, redis_client: redis.Redis, session_cache: SessionCache):
+    def __init__(self, redis_client: RedisClient, session_cache: SessionCache):
         self.redis_client = redis_client
         self.session_cache = session_cache
         self.logger = logging.getLogger(__name__)
@@ -34,11 +34,8 @@ class WebSocketService:
             }
 
             # Сохраняем в Redis для распределенной системы
-            await self.redis_client.sadd(f"ws_connections:{user_id}", connection_id)
-            await self.redis_client.hset(
-                f"ws_metadata:{connection_id}",
-                mapping=self.connection_metadata[connection_id]
-            )
+            await self.redis_client.execute_operation('sadd', f"ws_connections:{user_id}", connection_id)
+            await self.redis_client.execute_operation('hset', f"ws_metadata:{connection_id}", mapping=self.connection_metadata[connection_id])
 
             self.logger.info(f"WebSocket connection registered for user {user_id}: {connection_id}")
 
@@ -56,8 +53,8 @@ class WebSocketService:
             self.connection_metadata.pop(connection_id, None)
 
             # Удаляем из Redis
-            await self.redis_client.srem(f"ws_connections:{user_id}", connection_id)
-            await self.redis_client.delete(f"ws_metadata:{connection_id}")
+            await self.redis_client.execute_operation('srem', f"ws_connections:{user_id}", connection_id)
+            await self.redis_client.execute_operation('delete', f"ws_metadata:{connection_id}")
 
             self.logger.info(f"WebSocket connection unregistered for user {user_id}: {connection_id}")
 
@@ -69,7 +66,7 @@ class WebSocketService:
         try:
             # Проверяем локальный кеш и Redis
             local_connections = self.connections.get(user_id, set())
-            redis_connections = await self.redis_client.smembers(f"ws_connections:{user_id}")
+            redis_connections = await self.redis_client.execute_operation('smembers', f"ws_connections:{user_id}")
             redis_connections = {conn.decode() for conn in redis_connections}
 
             # Объединяем и синхронизируем
@@ -96,10 +93,7 @@ class WebSocketService:
             for connection_id in connections:
                 try:
                     # Публикуем в Redis для распределенной доставки
-                    await self.redis_client.publish(
-                        f"ws_message:{connection_id}",
-                        json.dumps(notification)
-                    )
+                    await self.redis_client.execute_operation('publish', f"ws_message:{connection_id}", json.dumps(notification))
                     sent_count += 1
                 except Exception as e:
                     self.logger.error(f"Error sending notification to {connection_id}: {e}")
@@ -124,7 +118,7 @@ class WebSocketService:
 
             # Получаем всех активных пользователей
             pattern = "ws_connections:*"
-            keys = await self.redis_client.keys(pattern)
+            keys = await self.redis_client.execute_operation('keys', pattern)
 
             sent_count = 0
             for key in keys:
@@ -135,10 +129,7 @@ class WebSocketService:
                 connections = await self.get_user_connections(user_id)
                 for connection_id in connections:
                     try:
-                        await self.redis_client.publish(
-                            f"ws_message:{connection_id}",
-                            json.dumps(notification)
-                        )
+                        await self.redis_client.execute_operation('publish', f"ws_message:{connection_id}", json.dumps(notification))
                         sent_count += 1
                     except Exception as e:
                         self.logger.error(f"Error broadcasting to {connection_id}: {e}")
@@ -193,7 +184,7 @@ class WebSocketService:
             active_users = 0
 
             pattern = "ws_connections:*"
-            keys = await self.redis_client.keys(pattern)
+            keys = await self.redis_client.execute_operation('keys', pattern)
 
             for key in keys:
                 user_id = int(key.decode().split(":")[1])
@@ -217,11 +208,11 @@ class WebSocketService:
         try:
             cleaned_count = 0
             pattern = "ws_metadata:*"
-            keys = await self.redis_client.keys(pattern)
+            keys = await self.redis_client.execute_operation('keys', pattern)
 
             for key in keys:
                 connection_id = key.decode().split(":")[1]
-                metadata = await self.redis_client.hgetall(key)
+                metadata = await self.redis_client.execute_operation('hgetall', key)
 
                 if metadata:
                     connected_at = datetime.fromisoformat(metadata[b"connected_at"].decode())
@@ -240,7 +231,7 @@ class WebSocketService:
     async def subscribe_to_messages(self, connection_id: str):
         """Подписка на сообщения для конкретного соединения"""
         try:
-            pubsub = self.redis_client.pubsub()
+            pubsub = await self.redis_client.execute_operation('pubsub')
             await pubsub.subscribe(f"ws_message:{connection_id}")
 
             async for message in pubsub.listen():

@@ -60,7 +60,7 @@ WORKDIR /app
 COPY . .
 
 # Создание необходимых директорий
-RUN mkdir -p /app/logs /app/ssl && \
+RUN mkdir -p /app/logs /app/ssl /app/cookies && \
     chown -R appuser:appuser /app
 
 # Установка переменных окружения

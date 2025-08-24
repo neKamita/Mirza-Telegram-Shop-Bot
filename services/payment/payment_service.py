@@ -198,7 +198,7 @@ class PaymentService(PaymentInterface):
         try:
             # Получаем все ключи пополнений пользователя
             pattern = f"recharge:{user_id}:*"
-            keys = await self.payment_cache.redis_client.keys(pattern)
+            keys = await self.payment_cache.redis_client.execute_operation('keys', pattern)
 
             recharges = []
             for key in keys[:limit]:
@@ -223,7 +223,7 @@ class PaymentService(PaymentInterface):
         try:
             # Получаем все ключи платежей пользователя
             pattern = f"user_order:{user_id}:*"
-            keys = await self.payment_cache.redis_client.keys(pattern)
+            keys = await self.payment_cache.redis_client.execute_operation('keys', pattern)
 
             payments = []
             for key in keys[:limit]:
@@ -247,7 +247,7 @@ class PaymentService(PaymentInterface):
 
         try:
             cache_key = f"payment_status:{invoice_uuid}"
-            await self.payment_cache.redis_client.delete(cache_key)
+            await self.payment_cache.redis_client.execute_operation('delete', cache_key)
             return True
         except Exception:
             return False
@@ -259,7 +259,7 @@ class PaymentService(PaymentInterface):
 
         try:
             pattern = f"user_order:{user_id}:*"
-            keys = await self.payment_cache.redis_client.keys(pattern)
+            keys = await self.payment_cache.redis_client.execute_operation('keys', pattern)
 
             total_amount = 0
             payment_count = 0

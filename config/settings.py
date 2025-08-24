@@ -3,6 +3,10 @@
 """
 import os
 from typing import Optional
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения из файла .env
+load_dotenv()
 
 
 class Settings:
@@ -131,6 +135,7 @@ class Settings:
 
         # Production Domain Configuration
         self.production_domain: str = os.getenv("PRODUCTION_DOMAIN", "")
+        self.webhook_domain: str = os.getenv("WEBHOOK_DOMAIN", self.production_domain)  # Использует production_domain как fallback
         self.cloudflare_tunnel_url: str = os.getenv("CLOUDFLARE_TUNNEL_URL", "")
         self.enable_https_redirect: bool = os.getenv("ENABLE_HTTPS_REDIRECT", "True").lower() == "true"
 

@@ -69,7 +69,7 @@ class DomainLoggingMiddleware(BaseHTTPMiddleware):
                     "client_ip": client_host,
                     "cf_real_ip": cf_connecting_ip,
                     "host_header": host_header,
-                    "expected_domain": settings.production_domain,
+                    "expected_domain": settings.webhook_domain,
                     "user_agent": user_agent,
                     "cf_ray": cf_ray,
                     "method": request.method,
@@ -82,11 +82,11 @@ class DomainLoggingMiddleware(BaseHTTPMiddleware):
 
         # Проверка домена для webhook endpoint
         if request.url.path.startswith("/webhook/"):
-            if host_header != settings.production_domain:
+            if host_header != settings.webhook_domain:
                 logger.warning(
                     "domain_mismatch_detected",
                     extra={
-                        "expected_domain": settings.production_domain,
+                        "expected_domain": settings.webhook_domain,
                         "received_host": host_header,
                         "client_ip": client_host,
                         "cf_real_ip": cf_connecting_ip,
@@ -200,7 +200,7 @@ class SimpleRateLimitMiddleware(BaseHTTPMiddleware):
                         "error": "Rate limit exceeded",
                         "retry_after": 60,
                         "message": "Слишком много запросов. Попробуйте через минуту.",
-                        "domain": settings.production_domain
+                        "domain": settings.webhook_domain
                     }
                 )
 
@@ -218,7 +218,7 @@ services = {}
 async def lifespan(app: FastAPI):
     """Управление жизненным циклом приложения"""
     # Startup
-    logger.info("Starting webhook application", extra={"domain": settings.production_domain})
+    logger.info("Starting webhook application", extra={"domain": settings.webhook_domain})
 
     try:
         # Инициализация сервисов
@@ -401,10 +401,10 @@ app.add_middleware(SimpleRateLimitMiddleware)
 async def health_check():
     """Основной health check endpoint"""
     try:
-        health_data = {
+        health_data: Dict[str, Any] = {
             "status": "healthy",
             "service": "webhook-handler",
-            "domain": settings.production_domain,
+            "domain": settings.webhook_domain,
             "timestamp": datetime.utcnow().isoformat(),
             "version": "2.0.0",
             "environment": settings.environment
@@ -415,7 +415,7 @@ async def health_check():
         if 'health_service' in services and services['health_service']:
             services_status = await services['health_service'].get_health_status()
 
-        health_data["services"] = services_status
+        health_data.update({"services": services_status})
 
         # Определение общего статуса
         if services_status and services_status.get("status") == "unhealthy":
@@ -431,7 +431,7 @@ async def health_check():
             content={
                 "status": "unhealthy",
                 "error": "Внутренняя ошибка сервера",
-                "domain": settings.production_domain,
+                "domain": settings.webhook_domain,
                 "timestamp": datetime.utcnow().isoformat()
             },
             status_code=503
@@ -452,7 +452,7 @@ async def detailed_health_check():
 
         # Добавление информации о домене
         detailed_health.update({
-            "domain": settings.production_domain,
+            "domain": settings.webhook_domain,
             "cloudflare_tunnel_url": settings.cloudflare_tunnel_url,
             "webhook_domain_logging": settings.webhook_domain_logging,
             "domain_debug_logging": settings.domain_debug_logging
@@ -466,6 +466,7 @@ async def detailed_health_check():
             content={
                 "status": "unhealthy",
                 "error": "Внутренняя ошибка сервера",
+                "domain": settings.webhook_domain,
                 "timestamp": datetime.utcnow().isoformat()
             },
             status_code=503
@@ -482,7 +483,7 @@ async def metrics():
                 "metrics": {
                     "uptime": "running",
                     "version": "2.0.0",
-                    "domain": settings.production_domain
+                    "domain": settings.webhook_domain
                 },
                 "note": "Prometheus metrics require prometheus_client dependency"
             }
@@ -512,7 +513,7 @@ async def handle_heleket_webhook(request: Request):
         logger.info(
             "webhook_received",
             extra={
-                "domain": settings.production_domain,
+                "domain": settings.webhook_domain,
                 "client_ip": client_host,
                 "cf_real_ip": cf_real_ip,
                 "host_header": request.headers.get('host', 'unknown'),
@@ -530,7 +531,7 @@ async def handle_heleket_webhook(request: Request):
                 logger.info(
                     "webhook_processed_successfully",
                     extra={
-                        "domain": settings.production_domain,
+                        "domain": settings.webhook_domain,
                         "client_ip": client_host,
                         "cf_real_ip": cf_real_ip
                     }
@@ -539,7 +540,7 @@ async def handle_heleket_webhook(request: Request):
                 logger.warning(
                     "webhook_processing_failed",
                     extra={
-                        "domain": settings.production_domain,
+                        "domain": settings.webhook_domain,
                         "client_ip": client_host,
                         "cf_real_ip": cf_real_ip,
                         "status_code": result.status_code
@@ -552,7 +553,7 @@ async def handle_heleket_webhook(request: Request):
         logger.error(
             "webhook_http_error",
             extra={
-                "domain": settings.production_domain,
+                "domain": settings.webhook_domain,
                 "error": str(e),
                 "status_code": e.status_code
             },
@@ -564,7 +565,7 @@ async def handle_heleket_webhook(request: Request):
         logger.error(
             "webhook_unexpected_error",
             extra={
-                "domain": settings.production_domain,
+                "domain": settings.webhook_domain,
                 "error": str(e)
             },
             exc_info=True
@@ -573,7 +574,7 @@ async def handle_heleket_webhook(request: Request):
             content={
                 "status": "error",
                 "message": "Internal server error",
-                "domain": settings.production_domain
+                "domain": settings.webhook_domain
             },
             status_code=500
         )
@@ -587,7 +588,7 @@ async def root():
         content={
             "service": "Mirza Telegram Shop Bot - Webhook Handler",
             "version": "2.0.0",
-            "domain": settings.production_domain,
+            "domain": settings.webhook_domain,
             "status": "running",
             "endpoints": {
                 "health": "/health",
@@ -611,7 +612,7 @@ async def rate_limit_handler(request: Request, exc):
             "error": "Rate limit exceeded",
             "retry_after": 60,
             "message": "Слишком много запросов. Попробуйте через минуту.",
-            "domain": settings.production_domain
+            "domain": settings.webhook_domain
         }
     )
 
@@ -625,7 +626,7 @@ async def internal_error_handler(request: Request, exc):
         content={
             "error": "Internal server error",
             "message": "Произошла внутренняя ошибка сервера",
-            "domain": settings.production_domain
+            "domain": settings.webhook_domain
         }
     )
 

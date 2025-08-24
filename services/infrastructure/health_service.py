@@ -1,3 +1,4 @@
+import json
 """
 Health Check Service - сервис для мониторинга состояния системы
 """
@@ -74,7 +75,9 @@ class HealthService:
             timeout = aiohttp.ClientTimeout(total=5)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 start_time = datetime.utcnow()
-                async with session.get("https://api.telegram.org/bot/getMe") as response:
+                # Используем токен из настроек для авторизации
+                telegram_url = f"https://api.telegram.org/bot{settings.telegram_token}/getMe"
+                async with session.get(telegram_url) as response:
                     response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
                     results["telegram_api"] = {
                         "status": "healthy" if response.status == 200 else "unhealthy",
@@ -87,25 +90,79 @@ class HealthService:
                 "error": str(e)
             }
 
-        # Проверка платежной системы
-        try:
-            timeout = aiohttp.ClientTimeout(total=5)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                start_time = datetime.utcnow()
-                async with session.get("https://api.heleket.com/v1/health") as response:
-                    response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
-                    results["payment_service"] = {
-                        "status": "healthy" if response.status == 200 else "unhealthy",
-                        "response_time_ms": response_time,
-                        "status_code": response.status
-                    }
-        except Exception as e:
-            results["payment_service"] = {
-                "status": "unhealthy",
-                "error": str(e)
-            }
+# Проверка платежной системы Heleket API
+        results["payment_service"] = await self.check_payment_service_health()
 
         return results
+    async def check_payment_service_health(self) -> Dict[str, Any]:
+        """Проверка состояния платежной системы Heleket API"""
+        try:
+            # Проверяем наличие credentials
+            if not settings.merchant_uuid or not settings.api_key:
+                return {
+                    "status": "unhealthy",
+                    "error": "Missing MERCHANT_UUID or API_KEY credentials",
+                    "config_status": "invalid"
+                }
+
+            # Проверяем доступность Heleket API
+            start_time = datetime.utcnow()
+
+            # Используем правильный endpoint для проверки доступности
+            payload = {}
+            json_data = json.dumps(payload)
+            headers = self._generate_payment_headers(json_data)
+
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    "https://api.heleket.com/v1/payment/services",
+                    headers=headers,
+                    data=json_data
+                ) as response:
+                    response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+
+                    if response.status == 200:
+                        return {
+                            "status": "healthy",
+                            "response_time_ms": response_time,
+                            "status_code": response.status,
+                            "config_status": "valid",
+                            "message": "Payment service API is available"
+                        }
+                    else:
+                        return {
+                            "status": "unhealthy",
+                            "response_time_ms": response_time,
+                            "status_code": response.status,
+                            "error": f"API returned status {response.status}",
+                            "config_status": "valid"
+                        }
+
+        except Exception as e:
+            return {
+                "status": "unhealthy",
+                "error": str(e),
+                "config_status": "valid" if settings.merchant_uuid and settings.api_key else "invalid"
+            }
+
+    def _generate_payment_headers(self, data: str) -> Dict[str, str]:
+        """Генерация заголовков для Heleket API"""
+        import hashlib
+        import base64
+
+        signature = hashlib.md5(
+            base64.b64encode(data.encode("ascii")) +
+            settings.api_key.encode("ascii")
+        ).hexdigest()
+
+        headers = {
+            "merchant": settings.merchant_uuid,
+            "sign": signature,
+            "Content-Type": "application/json"
+        }
+
+        return headers
 
     async def check_system_resources(self) -> Dict[str, Any]:
         """Проверка системных ресурсов"""
@@ -160,9 +217,10 @@ class HealthService:
 
         # Подсчет нездоровых сервисов
         unhealthy_services = []
-        for service, status in external_health.items():
-            if status.get("status") == "unhealthy":
-                unhealthy_services.append(service)
+        if external_health:
+            for service, status in external_health.items():
+                if status.get("status") == "unhealthy":
+                    unhealthy_services.append(service)
 
         if unhealthy_services:
             overall_status = "degraded"

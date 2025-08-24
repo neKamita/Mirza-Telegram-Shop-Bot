@@ -53,6 +53,7 @@ services:
     volumes:
       - ./logs:/app/logs:rw
       - ./ssl:/app/ssl:ro
+      - fragment_cookies:/app/cookies:rw
     networks:
       - bot-network
       - redis-cluster
@@ -336,9 +337,6 @@ services:
       - /tmp/chrome-profile
       - /tmp/chrome-data
       - /tmp/chrome-cache
-      - /tmp/chrome-profile
-      - /tmp/chrome-data
-      - /tmp/chrome-cache
     command:
       [
         "python",
@@ -362,6 +360,7 @@ services:
       - REDIS_CLUSTER_ENABLED=${REDIS_CLUSTER_ENABLED}
       - REDIS_CLUSTER_NODES=${REDIS_CLUSTER_NODES}
       - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
       - MERCHANT_UUID=${MERCHANT_UUID}
       - API_KEY=${API_KEY}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}

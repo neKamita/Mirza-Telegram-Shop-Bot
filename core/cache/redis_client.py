@@ -306,8 +306,8 @@ class RedisClient:
                 # Получаем метод Redis клиента
                 method = getattr(self._client, operation)
 
-                # Проверяем, является ли метод асинхронным или возвращает awaitable
-                if asyncio.iscoroutinefunction(method) or isinstance(self._client, RedisCluster):
+                # Проверяем, является ли метод асинхронным
+                if asyncio.iscoroutinefunction(method):
                     result = await method(*args, **kwargs)
                 else:
                     # Для синхронного метода используем asyncio.to_thread
@@ -404,6 +404,47 @@ class RedisClient:
             return False
         except Exception:
             return False
+
+    async def info(self, section: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Получение информации о Redis сервере
+
+        Args:
+            section: Опциональный раздел информации (например, 'server', 'clients', 'memory')
+
+        Returns:
+            Dict[str, Any]: Информация о Redis сервере
+        """
+        if not self._client:
+            raise CacheConnectionError("Redis client is not connected")
+
+        try:
+            # Используем execute_operation для безопасного вызова
+            if section:
+                result = await self.execute_operation('info', section)
+            else:
+                result = await self.execute_operation('info')
+
+            # Убеждаемся, что результат - это словарь
+            if isinstance(result, dict):
+                return result
+            elif isinstance(result, str):
+                # Парсинг строки в словарь
+                info_dict = {}
+                for line in result.split('\n'):
+                    if line and not line.startswith('#'):
+                        if ':' in line:
+                            key, value = line.split(':', 1)
+                            info_dict[key.strip()] = value.strip()
+                return info_dict
+            else:
+                # Если результат не является ни dict, ни str, возвращаем пустой dict
+                logger.warning(f"Unexpected Redis info result type: {type(result)}")
+                return {}
+
+        except Exception as e:
+            logger.error(f"Failed to get Redis info: {e}")
+            raise CacheConnectionError(f"Failed to get Redis info: {e}")
 
     # Context manager support
     async def __aenter__(self):

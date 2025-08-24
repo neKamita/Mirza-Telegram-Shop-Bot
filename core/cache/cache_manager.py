@@ -32,6 +32,7 @@ class CacheManager:
     def __init__(self):
         self.redis_client: Optional[RedisClient] = None
         self._cache_services: Dict[str, Any] = {}
+        self._is_initialized = False  # Флаг для предотвращения повторной инициализации
 
     async def initialize_redis(
         self,
@@ -60,6 +61,14 @@ class CacheManager:
             CacheInitializationError: При ошибке инициализации
         """
         try:
+            # Проверка, был ли Redis уже инициализирован
+            if self._is_initialized and self.redis_client:
+                logger.info("Redis client already initialized, returning existing client")
+                return {
+                    'redis_client': self.redis_client,
+                    'status': 'already_connected'
+                }
+
             # Валидация настроек
             self._validate_redis_settings(
                 redis_url=redis_url,
@@ -69,38 +78,50 @@ class CacheManager:
 
             # Создание Redis клиента
             if is_redis_cluster:
-                cluster_nodes = self._parse_cluster_nodes(redis_cluster_nodes)
-                self.redis_client = create_cluster_redis_client(
-                    nodes=cluster_nodes,
-                    password=redis_password,
-                    decode_responses=decode_responses,
-                    **redis_kwargs
-                )
+                if redis_cluster_nodes:
+                    cluster_nodes = self._parse_cluster_nodes(redis_cluster_nodes)
+                    self.redis_client = create_cluster_redis_client(
+                        nodes=cluster_nodes,
+                        password=redis_password,
+                        decode_responses=decode_responses,
+                        **redis_kwargs
+                    )
+                else:
+                    raise CacheInitializationError("redis_cluster_nodes is required for cluster mode")
             else:
                 # Парсинг URL для одиночного Redis
-                parsed_url = self._parse_redis_url(redis_url)
-                self.redis_client = create_single_redis_client(
-                    host=parsed_url['host'],
-                    port=parsed_url['port'],
-                    db=parsed_url.get('db', 0),
-                    password=redis_password,
-                    decode_responses=decode_responses,
-                    **redis_kwargs
-                )
+                if redis_url:
+                    parsed_url = self._parse_redis_url(redis_url)
+                    self.redis_client = create_single_redis_client(
+                        host=parsed_url['host'],
+                        port=parsed_url['port'],
+                        db=parsed_url.get('db', 0),
+                        password=redis_password,
+                        decode_responses=decode_responses,
+                        **redis_kwargs
+                    )
+                else:
+                    raise CacheInitializationError("redis_url is required for single Redis mode")
 
             # Подключение к Redis
-            connection_success = await self.redis_client.connect()
-            if not connection_success:
-                raise CacheInitializationError("Failed to connect to Redis")
+            if self.redis_client:
+                connection_success = await self.redis_client.connect()
+                if not connection_success:
+                    raise CacheInitializationError("Failed to connect to Redis")
 
-            # Тестирование подключения
-            await self.redis_client.ping()
-            logger.info("Redis cache initialized successfully")
+                # Тестирование подключения
+                await self.redis_client.ping()
+                logger.info("Redis cache initialized successfully")
 
-            return {
-                'redis_client': self.redis_client,
-                'status': 'connected'
-            }
+                # Установка флага инициализации
+                self._is_initialized = True
+
+                return {
+                    'redis_client': self.redis_client,
+                    'status': 'connected'
+                }
+            else:
+                raise CacheInitializationError("Failed to create Redis client")
 
         except Exception as e:
             error_msg = f"Failed to initialize Redis cache: {str(e)}"
@@ -234,6 +255,8 @@ class CacheManager:
         """Закрытие соединений"""
         if self.redis_client:
             await self.redis_client.disconnect()
+            self.redis_client = None
+            self._is_initialized = False  # Сброс флага при закрытии
 
         for service_name, service in self._cache_services.items():
             if hasattr(service, 'close'):
@@ -241,6 +264,55 @@ class CacheManager:
                     await service.close()
                 except Exception as e:
                     logger.error(f"Error closing {service_name}: {e}")
+
+    async def get_or_create_redis_client(
+        self,
+        redis_url: Optional[str] = None,
+        redis_cluster_nodes: Optional[str] = None,
+        redis_password: Optional[str] = None,
+        is_redis_cluster: bool = False,
+        decode_responses: bool = True,
+        **redis_kwargs
+    ) -> RedisClient:
+        """
+        Получить существующий Redis клиент или создать новый
+
+        Args:
+            redis_url: URL для одиночного Redis (redis://host:port/db)
+            redis_cluster_nodes: Список узлов кластера через запятую (host:port,host:port)
+            redis_password: Пароль Redis
+            is_redis_cluster: Флаг использования кластера
+            decode_responses: Декодировать ответы в строки
+            **redis_kwargs: Дополнительные параметры Redis
+
+        Returns:
+            RedisClient: Redis клиент
+
+        Raises:
+            CacheInitializationError: При ошибке инициализации
+        """
+        if self._is_initialized and self.redis_client:
+            logger.debug("Returning existing Redis client")
+            return self.redis_client
+
+        # Инициализация Redis если не был инициализирован
+        result = await self.initialize_redis(
+            redis_url=redis_url,
+            redis_cluster_nodes=redis_cluster_nodes,
+            redis_password=redis_password,
+            is_redis_cluster=is_redis_cluster,
+            decode_responses=decode_responses,
+            **redis_kwargs
+        )
+
+        return result['redis_client']
+
+    def reset(self) -> None:
+        """Сброс состояния менеджера (для тестирования)"""
+        self.redis_client = None
+        self._cache_services = {}
+        self._is_initialized = False
+        logger.info("Cache manager reset")
 
 
 # Глобальный экземпляр для использования в приложении
@@ -259,6 +331,7 @@ async def initialize_cache_services(
     Унифицированная функция инициализации Redis кеша для всех сервисов
 
     Эта функция должна использоваться во всех частях приложения для инициализации Redis.
+    Использует паттерн Singleton для предотвращения дублирования Redis клиентов.
 
     Args:
         redis_url: URL для одиночного Redis (redis://host:port/db)
@@ -290,20 +363,31 @@ async def initialize_cache_services(
     """
     global cache_manager
 
-    # Инициализация Redis
-    redis_result = await cache_manager.initialize_redis(
-        redis_url=redis_url,
-        redis_cluster_nodes=redis_cluster_nodes,
-        redis_password=redis_password,
-        is_redis_cluster=is_redis_cluster,
-        decode_responses=decode_responses,
-        **redis_kwargs
-    )
+    try:
+        # Получение или создание Redis клиента (Singleton паттерн)
+        redis_client = await cache_manager.get_or_create_redis_client(
+            redis_url=redis_url,
+            redis_cluster_nodes=redis_cluster_nodes,
+            redis_password=redis_password,
+            is_redis_cluster=is_redis_cluster,
+            decode_responses=decode_responses,
+            **redis_kwargs
+        )
 
-    # Создание сервисов кеширования
-    cache_services = await cache_manager.create_cache_services(redis_result['redis_client'])
+        # Создание сервисов кеширования, если они еще не созданы
+        if not cache_manager._cache_services:
+            cache_services = await cache_manager.create_cache_services(redis_client)
+        else:
+            # Использование существующих сервисов
+            cache_services = cache_manager._cache_services
 
-    return {
-        **redis_result,
-        **cache_services
-    }
+        return {
+            'redis_client': redis_client,
+            'status': 'already_connected' if cache_manager._is_initialized and redis_client else 'connected',
+            **cache_services
+        }
+
+    except Exception as e:
+        error_msg = f"Failed to initialize cache services: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        raise CacheInitializationError(error_msg) from e
