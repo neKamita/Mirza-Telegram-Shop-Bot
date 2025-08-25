@@ -4,7 +4,7 @@
 import logging
 from typing import Dict, Any, Optional, Union
 
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InaccessibleMessage
 from aiogram import Bot
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
@@ -12,6 +12,7 @@ from aiogram.types import InlineKeyboardButton
 from .base_handler import BaseHandler
 from .error_handler import ErrorHandler
 from utils.rate_limit_messages import RateLimitMessages
+from utils.safe_message_edit import safe_edit_message
 
 
 class BalanceHandler(BaseHandler):
@@ -37,8 +38,12 @@ class BalanceHandler(BaseHandler):
             bot: Экземпляр бота
         """
         if isinstance(message_or_callback, CallbackQuery):
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
         else:
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
             
         await self.safe_execute(
@@ -85,18 +90,13 @@ class BalanceHandler(BaseHandler):
 
                 if message:
                     try:
-                        if is_callback:
-                            await message.edit_text(
-                                balance_message,
-                                reply_markup=builder.as_markup(),
-                                parse_mode="HTML"
-                            )
-                        else:
-                            await message.answer(
-                                balance_message,
-                                reply_markup=builder.as_markup(),
-                                parse_mode="HTML"
-                            )
+                        success = await safe_edit_message(
+                            message_or_callback if is_callback else message,
+                            balance_message,
+                            reply_markup=builder.as_markup()
+                        )
+                        if not success:
+                            self.logger.error("Failed to send balance message")
                     except Exception as e:
                         self.logger.error(f"Error editing/answering message in show_balance: {e}")
                         await message.answer(
@@ -113,22 +113,15 @@ class BalanceHandler(BaseHandler):
 
                 if message:
                     try:
-                        if is_callback:
-                            await message.edit_text(
-                                "❌ <b>Не удалось получить баланс</b> ❌\n\n"
-                                f"🔧 <i>Пожалуйста, попробуйте позже</i>\n\n"
-                                f"💡 <i>Если проблема сохраняется, обратитесь в поддержку</i>",
-                                reply_markup=builder.as_markup(),
-                                parse_mode="HTML"
-                            )
-                        else:
-                            await message.answer(
-                                "❌ <b>Не удалось получить баланс</b> ❌\n\n"
-                                f"🔧 <i>Пожалуйста, попробуйте позже</i>\n\n"
-                                f"💡 <i>Если проблема сохраняется, обратитесь в поддержку</i>",
-                                reply_markup=builder.as_markup(),
-                                parse_mode="HTML"
-                            )
+                        success = await safe_edit_message(
+                            message_or_callback if is_callback else message,
+                            "❌ <b>Не удалось получить баланс</b> ❌\n\n"
+                            f"🔧 <i>Пожалуйста, попробуйте позже</i>\n\n"
+                            f"💡 <i>Если проблема сохраняется, обратитесь в поддержку</i>",
+                            reply_markup=builder.as_markup()
+                        )
+                        if not success:
+                            self.logger.error("Failed to send error message for balance retrieval")
                     except Exception as e:
                         self.logger.error(f"Error editing/answering message in show_balance error case: {e}")
                         await message.answer(
@@ -158,8 +151,12 @@ class BalanceHandler(BaseHandler):
             bot: Экземпляр бота
         """
         if isinstance(message_or_callback, CallbackQuery):
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
         else:
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
             
         # Проверяем rate limit перед выполнением операции (20 операций в минуту)
@@ -206,22 +203,15 @@ class BalanceHandler(BaseHandler):
 
                 if message:
                     try:
-                        if is_callback:
-                            await message.edit_text(
-                                "📊 <b>У вас пока нет истории транзакций</b> 📊\n\n"
-                                f"🔍 <i>Ваши транзакции будут отображаться здесь</i>\n\n"
-                                f"💡 <i>Совершите первую покупку, чтобы увидеть историю</i>",
-                                reply_markup=builder.as_markup(),
-                                parse_mode="HTML"
-                            )
-                        else:
-                            await message.answer(
-                                "📊 <b>У вас пока нет истории транзакций</b> 📊\n\n"
-                                f"🔍 <i>Ваши транзакции будут отображаться здесь</i>\n\n"
-                                f"💡 <i>Совершите первую покупку, чтобы увидеть историю</i>",
-                                reply_markup=builder.as_markup(),
-                                parse_mode="HTML"
-                            )
+                        success = await safe_edit_message(
+                            message_or_callback if is_callback else message,
+                            "📊 <b>У вас пока нет истории транзакций</b> 📊\n\n"
+                            f"🔍 <i>Ваши транзакции будут отображаться здесь</i>\n\n"
+                            f"💡 <i>Совершите первую покупку, чтобы увидеть историю</i>",
+                            reply_markup=builder.as_markup()
+                        )
+                        if not success:
+                            self.logger.error("Failed to send empty history message")
                     except Exception as e:
                         self.logger.error(f"Error editing/answering message in show_balance_history no transactions: {e}")
                         await message.answer(
@@ -243,18 +233,13 @@ class BalanceHandler(BaseHandler):
 
             if message:
                 try:
-                    if is_callback:
-                        await message.edit_text(
-                            message_text,
-                            reply_markup=builder.as_markup(),
-                            parse_mode="HTML"
-                        )
-                    else:
-                        await message.answer(
-                            message_text,
-                            reply_markup=builder.as_markup(),
-                            parse_mode="HTML"
-                        )
+                    success = await safe_edit_message(
+                        message_or_callback if is_callback else message,
+                        message_text,
+                        reply_markup=builder.as_markup()
+                    )
+                    if not success:
+                        self.logger.error("Failed to send transaction history message")
                 except Exception as e:
                     self.logger.error(f"Error editing/answering message in show_balance_history success case: {e}")
                     await message.answer(
@@ -319,6 +304,8 @@ class BalanceHandler(BaseHandler):
             limit_type: Тип лимита
         """
         try:
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
             remaining_time = await self.get_rate_limit_remaining_time(user_id, limit_type)
             

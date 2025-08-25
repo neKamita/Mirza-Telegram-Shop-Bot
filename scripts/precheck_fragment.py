@@ -82,14 +82,16 @@ def check_chrome_driver() -> bool:
         print("✅ ChromeDriver найден")
         return True
     else:
-        # Проверяем, установлен ли chromedriver-py
+        # Проверяем, установлен ли webdriver-manager для автоматического управления ChromeDriver
         try:
-            import chromedriver_py
-            print("✅ ChromeDriver доступен через chromedriver-py")
+            from webdriver_manager.chrome import ChromeDriverManager
+            print("✅ ChromeDriver доступен через webdriver-manager")
             return True
         except ImportError:
             print("⚠️  ChromeDriver не найден по пути:", driver_path)
+            print("⚠️  webdriver-manager не установлен")
             print("💡 Это может повлиять на автоматическое обновление cookies")
+            print("💡 Установите webdriver-manager: pip install webdriver-manager")
             return False
 
 

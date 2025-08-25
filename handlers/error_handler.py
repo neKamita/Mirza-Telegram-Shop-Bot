@@ -5,7 +5,7 @@ import logging
 from enum import Enum
 from typing import Dict, Any, Optional, List
 
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InaccessibleMessage
 from aiogram import Bot
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
@@ -13,6 +13,7 @@ from aiogram.types import InlineKeyboardButton
 from .base_handler import BaseHandler
 from services.payment import BalanceService
 from utils.message_templates import MessageTemplate
+from utils.safe_message_edit import safe_edit_message
 
 
 class PurchaseErrorType(Enum):
@@ -272,11 +273,7 @@ class ErrorHandler(BaseHandler):
         if isinstance(message, Message):
             await message.answer(error_message, reply_markup=builder.as_markup(), parse_mode="HTML")
         elif isinstance(message, CallbackQuery) and message.message:
-            try:
-                await message.message.edit_text(error_message, reply_markup=builder.as_markup(), parse_mode="HTML")
-            except Exception as e:
-                self.logger.error(f"Error editing message for error: {e}")
-                await message.message.answer(error_message, reply_markup=builder.as_markup(), parse_mode="HTML")
+            await safe_edit_message(message.message, error_message, reply_markup=builder.as_markup(), parse_mode="HTML")
 
     async def handle_error_action(self, callback: CallbackQuery, bot: Bot) -> None:
         """
@@ -287,10 +284,10 @@ class ErrorHandler(BaseHandler):
             bot: Экземпляр бота
         """
         await callback.answer()
-        
-        if not callback.from_user or not callback.from_user.id:
+
+        if not callback.from_user or not callback.from_user.id or not callback.data:
             return
-            
+
         user_id = callback.from_user.id
         action = callback.data.replace("error_action_", "")
         
@@ -300,57 +297,65 @@ class ErrorHandler(BaseHandler):
         if action == "recharge":
             # Перенаправление на пополнение баланса
             # Здесь можно вызвать соответствующий метод из другого обработчика
-            await callback.message.answer("🔄 <b>Перенаправление на пополнение баланса</b> 🔄\n\n"
-                                        "💳 <i>Вы будете перенаправлены в меню пополнения</i>\n\n"
-                                        "💡 <i>Подождите...</i>",
-                                        parse_mode="HTML")
+            if callback.message:
+                await callback.message.answer("🔄 <b>Перенаправление на пополнение баланса</b> 🔄\n\n"
+                                            "💳 <i>Вы будете перенаправлены в меню пополнения</i>\n\n"
+                                            "💡 <i>Подождите...</i>",
+                                            parse_mode="HTML")
         elif action == "reduce_amount":
             # Показываем меню покупки звезд с меньшими суммами
-            await callback.message.answer("⭐ <b>Меню покупки звезд</b> ⭐\n\n"
-                                        "🎯 <i>Выберите пакет с меньшей суммой</i>\n\n"
-                                        "💡 <i>Подождите перенаправления...</i>",
-                                        parse_mode="HTML")
+            if callback.message:
+                await callback.message.answer("⭐ <b>Меню покупки звезд</b> ⭐\n\n"
+                                            "🎯 <i>Выберите пакет с меньшей суммой</i>\n\n"
+                                            "💡 <i>Подождите перенаправления...</i>",
+                                            parse_mode="HTML")
         elif action == "alternative_payment":
             # Показываем меню с альтернативными способами оплаты
-            await callback.message.answer("💳 <b>Альтернативные способы оплаты</b> 💳\n\n"
-                                        "🔄 <i>Выберите другой способ оплаты</i>\n\n"
-                                        "💡 <i>Подождите перенаправления...</i>",
-                                        parse_mode="HTML")
+            if callback.message:
+                await callback.message.answer("💳 <b>Альтернативные способы оплаты</b> 💳\n\n"
+                                            "🔄 <i>Выберите другой способ оплаты</i>\n\n"
+                                            "💡 <i>Подождите перенаправления...</i>",
+                                            parse_mode="HTML")
         elif action == "check_connection":
             # Показываем сообщение о проверке соединения
-            await callback.message.answer("📡 <b>Проверьте интернет-соединение</b> 📡\n\n"
-                                        "🔍 <i>Убедитесь, что у вас есть стабильное подключение к интернету</i>\n\n"
-                                        "🔄 <i>Попробуйте снова через 30 секунд</i>\n\n"
-                                        "💡 <i>Если проблема сохраняется, обратитесь в поддержку</i>",
-                                        parse_mode="HTML")
+            if callback.message:
+                await callback.message.answer("📡 <b>Проверьте интернет-соединение</b> 📡\n\n"
+                                            "🔍 <i>Убедитесь, что у вас есть стабильное подключение к интернету</i>\n\n"
+                                            "🔄 <i>Попробуйте снова через 30 секунд</i>\n\n"
+                                            "💡 <i>Если проблема сохраняется, обратитесь в поддержку</i>",
+                                            parse_mode="HTML")
         elif action == "retry_later":
             # Показываем сообщение о повторной попытке
-            await callback.message.answer("⏰ <b>Попробуйте снова позже</b> ⏰\n\n"
-                                        "🔄 <i>Система временно недоступна</i>\n\n"
-                                        "⏳ <i>Попробуйте обновить страницу через 5 минут</i>\n\n"
-                                        "💡 <i>Если проблема сохраняется, обратитесь в поддержку</i>",
-                                        parse_mode="HTML")
+            if callback.message:
+                await callback.message.answer("⏰ <b>Попробуйте снова позже</b> ⏰\n\n"
+                                            "🔄 <i>Система временно недоступна</i>\n\n"
+                                            "⏳ <i>Попробуйте обновить страницу через 5 минут</i>\n\n"
+                                            "💡 <i>Если проблема сохраняется, обратитесь в поддержку</i>",
+                                            parse_mode="HTML")
         elif action == "retry":
             # Показываем сообщение о повторной попытке
-            await callback.message.answer("🔄 <b>Повторная попытка</b> 🔄\n\n"
-                                        "⚡ <i>Система пытается обработать ваш запрос снова</i>\n\n"
-                                        "🔧 <i>Это может занять несколько секунд</i>\n\n"
-                                        "💡 <i>Если проблема сохраняется, обратитесь в поддержку</i>",
-                                        parse_mode="HTML")
+            if callback.message:
+                await callback.message.answer("🔄 <b>Повторная попытка</b> 🔄\n\n"
+                                            "⚡ <i>Система пытается обработать ваш запрос снова</i>\n\n"
+                                            "🔧 <i>Это может занять несколько секунд</i>\n\n"
+                                            "💡 <i>Если проблема сохраняется, обратитесь в поддержку</i>",
+                                            parse_mode="HTML")
         elif action == "support":
             # Показываем экран помощи
-            from config.settings import settings
-            await callback.message.answer("🤖 <b>Помощь и поддержка</b> 🤖\n\n"
-                                        "📞 <i>Свяжитесь с нашей поддержкой для решения проблемы</i>\n\n"
-                                        f"👤 <i>Контакт: {settings.support_contact}</i>\n\n"
-                                        "⏰ <i>Ответ в течение 24 часов</i>",
-                                        parse_mode="HTML")
+            if callback.message:
+                from config.settings import settings
+                await callback.message.answer("🤖 <b>Помощь и поддержка</b> 🤖\n\n"
+                                            "📞 <i>Свяжитесь с нашей поддержкой для решения проблемы</i>\n\n"
+                                            f"👤 <i>Контакт: {settings.support_contact}</i>\n\n"
+                                            "⏰ <i>Ответ в течение 24 часов</i>",
+                                            parse_mode="HTML")
         else:
             # По умолчанию возвращаем в главное меню
-            await callback.message.answer("🔄 <b>Возврат в главное меню</b> 🔄\n\n"
-                                        "🏠 <i>Вы будете перенаправлены в главное меню</i>\n\n"
-                                        "💡 <i>Подождите...</i>",
-                                        parse_mode="HTML")
+            if callback.message:
+                await callback.message.answer("🔄 <b>Возврат в главное меню</b> 🔄\n\n"
+                                            "🏠 <i>Вы будете перенаправлены в главное меню</i>\n\n"
+                                            "💡 <i>Подождите...</i>",
+                                            parse_mode="HTML")
 
     async def handle_message(self, message: Message, bot: Bot) -> None:
         """

@@ -3,7 +3,7 @@
 """
 import logging
 from abc import ABC
-from typing import Any, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union
 
 from aiogram.types import Message, CallbackQuery
 from aiogram import Bot
@@ -111,11 +111,11 @@ class BaseHandler(EventHandlerInterface, ABC):
             self.logger.error(f"Error getting rate limit remaining time: {e}")
             return 60
 
-    async def safe_execute(self, 
-                          user_id: int, 
+    async def safe_execute(self,
+                          user_id: int,
                           operation: str,
-                          func: callable,
-                          *args, 
+                          func: Callable[..., Any],
+                          *args,
                           **kwargs) -> Any:
         """
         Безопасное выполнение операции с обработкой ошибок и валидацией

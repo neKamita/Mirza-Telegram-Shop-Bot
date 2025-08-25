@@ -24,6 +24,16 @@ try:
     SELENIUM_AVAILABLE = True
     WEBDRIVER_MANAGER_AVAILABLE = True
 except ImportError:
+    # Инициализируем переменные как None при неудачном импорте
+    webdriver = None
+    Options = None
+    ChromeService = None
+    By = None
+    WebDriverWait = None
+    EC = None
+    TimeoutException = None
+    WebDriverException = None
+    ChromeDriverManager = None
     SELENIUM_AVAILABLE = False
     WEBDRIVER_MANAGER_AVAILABLE = False
     logging.warning("Selenium not available, automatic cookie refresh will be disabled")
@@ -118,6 +128,10 @@ class FragmentCookieManager:
             self.logger.info("Refreshing Fragment cookies...")
 
             # Настройка headless браузера
+            if not Options or not ChromeService or not webdriver:
+                self.logger.error("Selenium components not available")
+                return None
+
             chrome_options = Options()
             chrome_options.add_argument("--headless")
             chrome_options.add_argument("--no-sandbox")
@@ -140,9 +154,9 @@ class FragmentCookieManager:
             os.makedirs("/tmp/chrome-data", exist_ok=True)
             os.makedirs("/tmp/chrome-cache", exist_ok=True)
             chrome_options.add_argument("--disable-features=VizDisplayCompositor")
-            
+
             # Создаем драйвер с webdriver-manager для автоматического управления версиями
-            if WEBDRIVER_MANAGER_AVAILABLE:
+            if WEBDRIVER_MANAGER_AVAILABLE and ChromeDriverManager:
                 # Используем webdriver-manager для автоматического управления ChromeDriver
                 service = ChromeService(ChromeDriverManager().install())
                 driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -151,11 +165,16 @@ class FragmentCookieManager:
                 driver_path = os.getenv("CHROMEDRIVER_PATH", "/usr/local/bin/chromedriver")
                 service = ChromeService(executable_path=driver_path)
                 driver = webdriver.Chrome(service=service, options=chrome_options)
-            
+
+            # Проверяем доступность компонентов WebDriverWait, EC, By
+            if not WebDriverWait or not EC or not By:
+                self.logger.error("Selenium WebDriverWait, EC, or By not available")
+                return None
+
             try:
                 # Переходим на страницу Fragment
                 driver.get("https://fragment.com")
-                
+
                 # Ждем загрузки страницы
                 wait = WebDriverWait(driver, 10)
                 wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))

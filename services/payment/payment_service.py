@@ -196,6 +196,10 @@ class PaymentService(PaymentInterface):
             return {"error": "Payment cache not available", "status": "failed"}
 
         try:
+            # Проверяем доступность redis_client
+            if not self.payment_cache.redis_client:
+                return {"error": "Redis client not available", "status": "failed"}
+
             # Получаем все ключи пополнений пользователя
             pattern = f"recharge:{user_id}:*"
             keys = await self.payment_cache.redis_client.execute_operation('keys', pattern)
@@ -221,6 +225,10 @@ class PaymentService(PaymentInterface):
             return {"error": "Payment cache not available", "status": "failed"}
 
         try:
+            # Проверяем доступность redis_client
+            if not self.payment_cache.redis_client:
+                return {"error": "Redis client not available", "status": "failed"}
+
             # Получаем все ключи платежей пользователя
             pattern = f"user_order:{user_id}:*"
             keys = await self.payment_cache.redis_client.execute_operation('keys', pattern)
@@ -246,6 +254,10 @@ class PaymentService(PaymentInterface):
             return False
 
         try:
+            # Проверяем доступность redis_client
+            if not self.payment_cache.redis_client:
+                return False
+
             cache_key = f"payment_status:{invoice_uuid}"
             await self.payment_cache.redis_client.execute_operation('delete', cache_key)
             return True
@@ -258,6 +270,10 @@ class PaymentService(PaymentInterface):
             return {"error": "Payment cache not available", "status": "failed"}
 
         try:
+            # Проверяем доступность redis_client
+            if not self.payment_cache.redis_client:
+                return {"error": "Redis client not available", "status": "failed"}
+
             pattern = f"user_order:{user_id}:*"
             keys = await self.payment_cache.redis_client.execute_operation('keys', pattern)
 

@@ -5,7 +5,7 @@ import logging
 from typing import Dict, Any, Optional, Union
 from datetime import datetime
 
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InaccessibleMessage
 from aiogram import Bot
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
@@ -14,6 +14,7 @@ from .base_handler import BaseHandler
 from .error_handler import ErrorHandler
 from utils.message_templates import MessageTemplate
 from utils.rate_limit_messages import RateLimitMessages
+from utils.safe_message_edit import safe_edit_message
 
 
 class PaymentHandler(BaseHandler):
@@ -42,8 +43,12 @@ class PaymentHandler(BaseHandler):
             amount: Сумма для пополнения (опционально)
         """
         if isinstance(message_or_callback, CallbackQuery):
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
         else:
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
             
         await self.safe_execute(
@@ -69,8 +74,12 @@ class PaymentHandler(BaseHandler):
             payment_id: ID платежа (опционально)
         """
         if isinstance(message_or_callback, CallbackQuery):
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
         else:
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
             
         await self.safe_execute(
@@ -100,9 +109,14 @@ class PaymentHandler(BaseHandler):
         
         # Если payment_id не указан, извлекаем из callback
         if not payment_id and isinstance(message_or_callback, CallbackQuery):
+            if not message_or_callback.data:
+                return
             payment_id = message_or_callback.data.replace("check_recharge_", "")
 
         try:
+            if not payment_id:
+                return
+
             # Проверяем статус через сервис покупки звезд
             status_result = await self.star_purchase_service.check_recharge_status(payment_id)
 
@@ -166,6 +180,10 @@ class PaymentHandler(BaseHandler):
 
             if message:
                 try:
+                    # Проверяем, что сообщение доступно для редактирования
+                    if isinstance(message, InaccessibleMessage):
+                        return
+
                     # Получаем текущий текст сообщения
                     existing_text = message.text or ""
                     
@@ -200,18 +218,13 @@ class PaymentHandler(BaseHandler):
                     
                     updated_text = '\n'.join(new_lines)
                     
-                    if is_callback:
-                        await message.edit_text(
-                            updated_text,
-                            reply_markup=builder.as_markup(),
-                            parse_mode="HTML"
-                        )
-                    else:
-                        await message.answer(
-                            updated_text,
-                            reply_markup=builder.as_markup(),
-                            parse_mode="HTML"
-                        )
+                    success = await safe_edit_message(
+                        message_or_callback if is_callback else message,
+                        updated_text,
+                        reply_markup=builder.as_markup()
+                    )
+                    if not success:
+                        self.logger.error("Failed to update recharge status message")
                 except Exception as e:
                     self.logger.error(f"Error editing/answering message in check_recharge_status success case: {e}")
                     # В случае ошибки редактирования, ничего не отправляем
@@ -240,8 +253,12 @@ class PaymentHandler(BaseHandler):
             amount: Сумма для пополнения
         """
         if isinstance(message_or_callback, CallbackQuery):
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
         else:
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
             
         await self.safe_execute(
@@ -293,10 +310,12 @@ class PaymentHandler(BaseHandler):
             if not result or "uuid" not in result or "url" not in result:
                 if message:
                     try:
-                        if is_callback:
-                            await message.edit_text("❌ Ошибка: некорректные данные от платежной системы")
-                        else:
-                            await message.answer("❌ Ошибка: некорректные данные от платежной системы")
+                        success = await safe_edit_message(
+                            message_or_callback if is_callback else message,
+                            "❌ Ошибка: некорректные данные от платежной системы"
+                        )
+                        if not success:
+                            self.logger.error("Failed to send error message about invalid payment data")
                     except Exception as e:
                         self.logger.error(f"Error editing/answering message in handle_recharge_amount data error case: {e}")
                         await message.answer("❌ Ошибка: некорректные данные от платежной системы")
@@ -321,30 +340,19 @@ class PaymentHandler(BaseHandler):
                     # Добавляем статус оплаты в сообщение
                     status_line = self.payment_service.get_payment_status_message("pending", amount, None)
                     
-                    if is_callback:
-                        await message.edit_text(
-                            f"✅ <b>Создан счет на пополнение баланса на {amount} TON</b> ✅\n\n"
-                            f"💳 <b>Ссылка на оплату:</b> {result['url']}\n\n"
-                            f"📋 <b>ID счета:</b> {result['uuid']}\n"
-                            f"🔢 <b>ID транзакции:</b> {transaction_id}\n"
-                            f"{status_line}\n\n"
-                            f"🔗 <i>Перейдите по ссылке для оплаты</i>\n"
-                            f"⏰ <i>Счет действителен в течение 15 минут</i>",
-                            reply_markup=builder.as_markup(),
-                            parse_mode="HTML"
-                        )
-                    else:
-                        await message.answer(
-                            f"✅ <b>Создан счет на пополнение баланса на {amount} TON</b> ✅\n\n"
-                            f"💳 <b>Ссылка на оплату:</b> {result['url']}\n\n"
-                            f"📋 <b>ID счета:</b> {result['uuid']}\n"
-                            f"🔢 <b>ID транзакции:</b> {transaction_id}\n"
-                            f"{status_line}\n\n"
-                            f"🔗 <i>Перейдите по ссылке для оплаты</i>\n"
-                            f"⏰ <i>Счет действителен в течение 15 минут</i>",
-                            reply_markup=builder.as_markup(),
-                            parse_mode="HTML"
-                        )
+                    success = await safe_edit_message(
+                        message_or_callback if is_callback else message,
+                        f"✅ <b>Создан счет на пополнение баланса на {amount} TON</b> ✅\n\n"
+                        f"💳 <b>Ссылка на оплату:</b> {result['url']}\n\n"
+                        f"📋 <b>ID счета:</b> {result['uuid']}\n"
+                        f"🔢 <b>ID транзакции:</b> {transaction_id}\n"
+                        f"{status_line}\n\n"
+                        f"🔗 <i>Перейдите по ссылке для оплаты</i>\n"
+                        f"⏰ <i>Счет действителен в течение 15 минут</i>",
+                        reply_markup=builder.as_markup()
+                    )
+                    if not success:
+                        self.logger.error("Failed to send payment creation message")
                 except Exception as e:
                     self.logger.error(f"Error editing/answering message in handle_recharge_amount success case: {e}")
                     # В случае ошибки редактирования, отправляем новое сообщение со статусом
@@ -428,12 +436,14 @@ class PaymentHandler(BaseHandler):
                 
                 try:
                     if callback.message:
-                        await callback.message.edit_text(
+                        success = await safe_edit_message(
+                            callback,
                             "❌ <b>Инвойс отменен</b> ❌\n\n" +
                             MessageTemplate.get_payment_menu_title(),
-                            reply_markup=builder.as_markup(),
-                            parse_mode="HTML"
+                            reply_markup=builder.as_markup()
                         )
+                        if not success:
+                            await callback.answer("❌ Инвойс отменен", show_alert=True)
                     else:
                         await callback.answer("❌ Инвойс отменен", show_alert=True)
                 except Exception as e:
@@ -482,6 +492,8 @@ class PaymentHandler(BaseHandler):
             bot: Экземпляр бота
         """
         # Проверяем rate limit для всех callback операций
+        if not callback.from_user or not callback.from_user.id:
+            return
         user_id = callback.from_user.id
         if not await self.check_rate_limit(user_id, "operation", 20, 60):
             self.logger.warning(f"Rate limit exceeded for user {user_id} in payment handler")
@@ -505,20 +517,22 @@ class PaymentHandler(BaseHandler):
             
             try:
                 if callback.message:
-                    await callback.message.edit_text(
+                    success = await safe_edit_message(
+                        callback,
                         MessageTemplate.get_payment_menu_title(),
-                        reply_markup=builder.as_markup(),
-                        parse_mode="HTML"
+                        reply_markup=builder.as_markup()
                     )
+                    if not success:
+                        await callback.answer("❌ <b>Ошибка: сообщение не найдено</b> ❓", show_alert=True)
                 else:
                     await callback.answer("❌ <b>Ошибка: сообщение не найдено</b> ❓", show_alert=True)
             except Exception as e:
                 self.logger.error(f"Error showing recharge menu: {e}")
                 await callback.answer("❌ <b>Ошибка при отображении меню</b> ❓", show_alert=True)
-        elif callback.data.startswith("check_recharge_"):
+        elif callback.data and callback.data.startswith("check_recharge_"):
             payment_id = callback.data.replace("check_recharge_", "")
             await self.check_recharge_status(callback, bot, payment_id)
-        elif callback.data.startswith("cancel_recharge_"):
+        elif callback.data and callback.data.startswith("cancel_recharge_"):
             payment_id = callback.data.replace("cancel_recharge_", "")
             await self.cancel_specific_recharge(callback, bot, payment_id)
         elif callback.data in ["recharge_10", "recharge_50", "recharge_100", "recharge_500"]:
@@ -551,11 +565,13 @@ class PaymentHandler(BaseHandler):
             
             try:
                 if callback.message:
-                    await callback.message.edit_text(
+                    success = await safe_edit_message(
+                        callback,
                         MessageTemplate.get_payment_menu_title(),
-                        reply_markup=builder.as_markup(),
-                        parse_mode="HTML"
+                        reply_markup=builder.as_markup()
                     )
+                    if not success:
+                        await callback.answer("❌ <b>Ошибка: сообщение не найдено</b> ❓", show_alert=True)
                 else:
                     await callback.answer("❌ <b>Ошибка: сообщение не найдено</b> ❓", show_alert=True)
             except Exception as e:
@@ -576,6 +592,8 @@ class PaymentHandler(BaseHandler):
             limit_type: Тип лимита
         """
         try:
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
             remaining_time = await self.get_rate_limit_remaining_time(user_id, limit_type)
             

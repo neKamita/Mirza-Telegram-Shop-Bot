@@ -4,7 +4,7 @@
 import logging
 from typing import Dict, Any, Optional, Union
 
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InaccessibleMessage, InlineKeyboardMarkup
 from aiogram import Bot
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
@@ -12,6 +12,7 @@ from aiogram.types import InlineKeyboardButton
 from .base_handler import BaseHandler
 from .error_handler import ErrorHandler
 from utils.rate_limit_messages import RateLimitMessages
+from utils.safe_message_edit import safe_edit_message
 
 
 class PurchaseHandler(BaseHandler):
@@ -101,18 +102,16 @@ class PurchaseHandler(BaseHandler):
         )
         
         try:
-            await callback.message.edit_text(
+            success = await safe_edit_message(
+                callback,
                 message_text,
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML"
             )
+            if not success:
+                self.logger.error("Failed to edit message in _show_buy_stars_menu")
         except Exception as e:
             self.logger.error(f"Error editing message in _show_buy_stars_menu: {e}")
-            await callback.message.answer(
-                message_text,
-                reply_markup=builder.as_markup(),
-                parse_mode="HTML"
-            )
 
     async def buy_stars_preset(self, message_or_callback: Union[Message, CallbackQuery], bot: Bot, amount: int) -> None:
         """
@@ -124,9 +123,12 @@ class PurchaseHandler(BaseHandler):
             amount: Количество звезд для покупки
         """
         if isinstance(message_or_callback, CallbackQuery):
-            user_id = message_or_callback.from_user.id
+            user_id = message_or_callback.from_user.id if message_or_callback.from_user else None
         else:
-            user_id = message_or_callback.from_user.id
+            user_id = message_or_callback.from_user.id if message_or_callback.from_user else None
+
+        if not user_id:
+            return
             
         await self.safe_execute(
             user_id=user_id,
@@ -206,27 +208,18 @@ class PurchaseHandler(BaseHandler):
                 f"✨ Ваши звезды уже доступны для использования!"
             )
 
-            if message:
+            if message and not isinstance(message, InaccessibleMessage):
                 try:
-                    if is_callback:
-                        await message.edit_text(
-                            success_message,
-                            reply_markup=builder.as_markup(),
-                            parse_mode="HTML"
-                        )
-                    else:
-                        await message.answer(
-                            success_message,
-                            reply_markup=builder.as_markup(),
-                            parse_mode="HTML"
-                        )
-                except Exception as e:
-                    self.logger.error(f"Error editing/answering message in buy_stars_preset success case: {e}")
-                    await message.answer(
+                    success = await safe_edit_message(
+                        message_or_callback if is_callback else message,
                         success_message,
                         reply_markup=builder.as_markup(),
                         parse_mode="HTML"
                     )
+                    if not success:
+                        self.logger.error("Failed to send success message in buy_stars_preset")
+                except Exception as e:
+                    self.logger.error(f"Error editing/answering message in buy_stars_preset success case: {e}")
 
         except Exception as e:
             self.logger.error(f"Error creating star purchase for user {user_id}: {e}")
@@ -251,10 +244,13 @@ class PurchaseHandler(BaseHandler):
             amount: Количество звезд для покупки
         """
         if isinstance(message_or_callback, CallbackQuery):
-            user_id = message_or_callback.from_user.id
+            user_id = message_or_callback.from_user.id if message_or_callback.from_user else None
         else:
-            user_id = message_or_callback.from_user.id
-            
+            user_id = message_or_callback.from_user.id if message_or_callback.from_user else None
+
+        if not user_id:
+            return
+
         await self.safe_execute(
             user_id=user_id,
             operation="buy_stars_custom",
@@ -304,13 +300,14 @@ class PurchaseHandler(BaseHandler):
             if not result or "uuid" not in result or "url" not in result:
                 if message:
                     try:
-                        if is_callback:
-                            await message.edit_text("❌ Ошибка: некорректные данные от платежной системы")
-                        else:
-                            await message.answer("❌ Ошибка: некорректные данные от платежной системы")
+                        success = await safe_edit_message(
+                            message_or_callback if is_callback else message,
+                            "❌ Ошибка: некорректные данные от платежной системы"
+                        )
+                        if not success:
+                            self.logger.error("Failed to send error message about invalid payment data")
                     except Exception as e:
                         self.logger.error(f"Error editing/answering message in buy_stars_custom data error case: {e}")
-                        await message.answer("❌ Ошибка: некорректные данные от платежной системы")
                 return
 
             builder = InlineKeyboardBuilder()
@@ -332,42 +329,22 @@ class PurchaseHandler(BaseHandler):
             
             if message:
                 try:
-                    if is_callback:
-                        await message.edit_text(
-                            f"✅ <b>Создан счет на покупку {amount} звезд</b> ✅\n\n"
-                            f"💳 <b>Ссылка на оплату:</b> {result['url']}\n\n"
-                            f"📋 <b>ID счета:</b> {result['uuid']}\n"
-                            f"🔢 <b>ID транзакции:</b> {transaction_id}\n"
-                            f"{status_line}\n\n"
-                            f"🔗 <i>Перейдите по ссылке для оплаты</i>\n"
-                            f"⏰ <i>Счет действителен в течение 15 минут</i>",
-                            reply_markup=builder.as_markup(),
-                            parse_mode="HTML"
-                        )
-                    else:
-                        await message.answer(
-                            f"✅ <b>Создан счет на покупку {amount} звезд</b> ✅\n\n"
-                            f"💳 <b>Ссылка на оплату:</b> {result['url']}\n\n"
-                            f"📋 <b>ID счета:</b> {result['uuid']}\n"
-                            f"🔢 <b>ID транзакции:</b> {transaction_id}\n"
-                            f"{status_line}\n\n"
-                            f"🔗 <i>Перейдите по ссылке для оплаты</i>\n"
-                            f"⏰ <i>Счет действителен в течение 15 минут</i>",
-                            reply_markup=builder.as_markup(),
-                            parse_mode="HTML"
-                        )
+                    success = await safe_edit_message(
+                        message_or_callback if is_callback else message,
+                        f"✅ <b>Создан счет на покупку {amount} звезд</b> ✅\n\n"
+                        f"💳 <b>Ссылка на оплату:</b> {result['url']}\n\n"
+                        f"📋 <b>ID счета:</b> {result['uuid']}\n"
+                        f"🔢 <b>ID транзакции:</b> {transaction_id}\n"
+                        f"{status_line}\n\n"
+                        f"🔗 <i>Перейдите по ссылке для оплаты</i>\n"
+                        f"⏰ <i>Счет действителен в течение 15 минут</i>",
+                        reply_markup=builder.as_markup(),
+                        parse_mode="HTML"
+                    )
+                    if not success:
+                        self.logger.error("Failed to send payment creation message")
                 except Exception as e:
                     self.logger.error(f"Error editing/answering message in buy_stars_custom success case: {e}")
-                    # В случае ошибки редактирования, отправляем новое сообщение со статусом
-                    status_line = self._format_payment_status("pending")
-                    await message.answer(
-                        f"✅ Создан счет на покупку {amount} звезд.\n\n"
-                        f"💳 Ссылка на оплату: {result['url']}\n\n"
-                        f"📋 ID счета: {result['uuid']}\n"
-                        f"🔢 ID транзакции: {transaction_id}\n"
-                        f"{status_line}",
-                        reply_markup=builder.as_markup()
-                    )
 
         except Exception as e:
             self.logger.error(f"Error creating custom star purchase for user {user_id}: {e}")
@@ -392,9 +369,12 @@ class PurchaseHandler(BaseHandler):
             amount: Количество звезд для покупки
         """
         if isinstance(message_or_callback, CallbackQuery):
-            user_id = message_or_callback.from_user.id
+            user_id = message_or_callback.from_user.id if message_or_callback.from_user else None
         else:
-            user_id = message_or_callback.from_user.id
+            user_id = message_or_callback.from_user.id if message_or_callback.from_user else None
+
+        if not user_id:
+            return
             
         await self.safe_execute(
             user_id=user_id,
@@ -415,9 +395,12 @@ class PurchaseHandler(BaseHandler):
             amount: Количество звезд для покупки
         """
         if isinstance(message_or_callback, CallbackQuery):
-            user_id = message_or_callback.from_user.id
+            user_id = message_or_callback.from_user.id if message_or_callback.from_user else None
         else:
-            user_id = message_or_callback.from_user.id
+            user_id = message_or_callback.from_user.id if message_or_callback.from_user else None
+
+        if not user_id:
+            return
             
         await self.safe_execute(
             user_id=user_id,
@@ -504,25 +487,16 @@ class PurchaseHandler(BaseHandler):
 
             if message:
                 try:
-                    if is_callback:
-                        await message.edit_text(
-                            success_message,
-                            reply_markup=builder.as_markup(),
-                            parse_mode="HTML"
-                        )
-                    else:
-                        await message.answer(
-                            success_message,
-                            reply_markup=builder.as_markup(),
-                            parse_mode="HTML"
-                        )
-                except Exception as e:
-                    self.logger.error(f"Error editing/answering message in buy_stars_with_balance success case: {e}")
-                    await message.answer(
+                    success = await safe_edit_message(
+                        message_or_callback if is_callback else message,
                         success_message,
                         reply_markup=builder.as_markup(),
                         parse_mode="HTML"
                     )
+                    if not success:
+                        self.logger.error("Failed to send success message in buy_stars_with_balance")
+                except Exception as e:
+                    self.logger.error(f"Error editing/answering message in buy_stars_with_balance success case: {e}")
 
         except Exception as e:
             self.logger.error(f"Error creating star purchase with balance for user {user_id}: {e}")
@@ -599,25 +573,16 @@ class PurchaseHandler(BaseHandler):
 
             if message:
                 try:
-                    if is_callback:
-                        await message.edit_text(
-                            success_message,
-                            reply_markup=builder.as_markup(),
-                            parse_mode="HTML"
-                        )
-                    else:
-                        await message.answer(
-                            success_message,
-                            reply_markup=builder.as_markup(),
-                            parse_mode="HTML"
-                        )
-                except Exception as e:
-                    self.logger.error(f"Error editing/answering message in buy_stars_with_fragment success case: {e}")
-                    await message.answer(
+                    success = await safe_edit_message(
+                        message_or_callback if is_callback else message,
                         success_message,
                         reply_markup=builder.as_markup(),
                         parse_mode="HTML"
                     )
+                    if not success:
+                        self.logger.error("Failed to send success message in buy_stars_with_fragment")
+                except Exception as e:
+                    self.logger.error(f"Error editing/answering message in buy_stars_with_fragment success case: {e}")
 
         except Exception as e:
             self.logger.error(f"Error creating star purchase with Fragment for user {user_id}: {e}")
@@ -688,30 +653,33 @@ class PurchaseHandler(BaseHandler):
         elif callback.data in ["buy_100_fragment", "buy_250_fragment", "buy_500_fragment", "buy_1000_fragment"]:
             amount = int(callback.data.replace("buy_", "").replace("_fragment", ""))
             await self.buy_stars_with_fragment(callback, bot, amount)
-        elif callback.data.startswith("check_payment_"):
+        elif callback.data and callback.data.startswith("check_payment_"):
             payment_id = callback.data.replace("check_payment_", "")
             # Здесь может быть вызов метода проверки статуса платежа
             await callback.answer(f"🔍 Проверка статуса платежа {payment_id}")
         elif callback.data == "back_to_buy_stars":
             # Возврат к главному меню покупок
             from handlers.message_handler import MessageHandler
-            await callback.message.edit_text(
-                "⭐ <b>Покупка звезд</b> ⭐\n\n"
-                "🎯 <i>Выберите способ оплаты:</i>\n\n"
-                f"💳 <i>Картой/Кошельком - оплата через Heleket</i>\n"
-                f"💰 <i>С баланса - списание со счета</i>\n"
-                f"💎 <i>Через Fragment - прямая покупка</i>\n\n"
-                f"✨ <i>Каждая звезда имеет ценность!</i>",
-                reply_markup=InlineKeyboardBuilder().row(
-                    InlineKeyboardButton(text="💳 Картой/Кошельком", callback_data="buy_stars"),
-                    InlineKeyboardButton(text="💰 С баланса", callback_data="buy_stars_balance")
-                ).row(
-                    InlineKeyboardButton(text="💎 Через Fragment", callback_data="buy_stars_fragment")
-                ).row(
-                    InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
-                ).as_markup(),
-                parse_mode="HTML"
-            )
+            if (callback.message and
+                not isinstance(callback.message, InaccessibleMessage) and
+                hasattr(callback.message, 'edit_text')):
+                await callback.message.edit_text(
+                    "⭐ <b>Покупка звезд</b> ⭐\n\n"
+                    "🎯 <i>Выберите способ оплаты:</i>\n\n"
+                    f"💳 <i>Картой/Кошельком - оплата через Heleket</i>\n"
+                    f"💰 <i>С баланса - списание со счета</i>\n"
+                    f"💎 <i>Через Fragment - прямая покупка</i>\n\n"
+                    f"✨ <i>Каждая звезда имеет ценность!</i>",
+                    reply_markup=InlineKeyboardBuilder().row(
+                        InlineKeyboardButton(text="💳 Картой/Кошельком", callback_data="buy_stars"),
+                        InlineKeyboardButton(text="💰 С баланса", callback_data="buy_stars_balance")
+                    ).row(
+                        InlineKeyboardButton(text="💎 Через Fragment", callback_data="buy_stars_fragment")
+                    ).row(
+                        InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
+                    ).as_markup(),  # type: ignore
+                    parse_mode="HTML"
+                )
         else:
             await callback.answer("❓ <b>Неизвестное действие</b> ❓\n\n"
                                "🔍 <i>Пожалуйста, используйте доступные кнопки</i>\n\n"
@@ -727,7 +695,9 @@ class PurchaseHandler(BaseHandler):
             limit_type: Тип лимита
         """
         try:
-            user_id = message_or_callback.from_user.id
+            user_id = message_or_callback.from_user.id if message_or_callback.from_user else None
+            if not user_id:
+                return
             remaining_time = await self.get_rate_limit_remaining_time(user_id, limit_type)
             
             if isinstance(message_or_callback, Message):
@@ -802,7 +772,10 @@ class PurchaseHandler(BaseHandler):
         
         # Отправляем сообщение
         try:
-            if isinstance(message_or_callback, CallbackQuery) and message_or_callback.message:
+            if (isinstance(message_or_callback, CallbackQuery) and
+                message_or_callback.message and
+                not isinstance(message_or_callback.message, InaccessibleMessage) and
+                hasattr(message_or_callback.message, 'edit_text')):
                 await message_or_callback.message.edit_text(
                     insufficient_balance_message,
                     reply_markup=builder.as_markup(),
@@ -810,7 +783,7 @@ class PurchaseHandler(BaseHandler):
                 )
             else:
                 message = message_or_callback.message if isinstance(message_or_callback, CallbackQuery) else message_or_callback
-                if message:
+                if message and hasattr(message, 'answer'):
                     await message.answer(
                         insufficient_balance_message,
                         reply_markup=builder.as_markup(),

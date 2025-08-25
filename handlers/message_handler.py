@@ -15,6 +15,7 @@ from .balance_handler import BalanceHandler
 from .payment_handler import PaymentHandler
 from .purchase_handler import PurchaseHandler
 from utils.message_templates import MessageTemplate
+from utils.safe_message_edit import safe_edit_message
 from utils.rate_limit_messages import RateLimitMessages
 
 
@@ -224,7 +225,6 @@ class MessageHandler(BaseHandler):
             if not message_or_callback.from_user or not message_or_callback.from_user.id:
                 self.logger.warning("Message or callback has no user information")
                 return False
-                
             user_id = message_or_callback.from_user.id
             
             # Проверка пользователя в базе данных
@@ -308,24 +308,14 @@ class MessageHandler(BaseHandler):
             )
         else:
             if isinstance(message_or_callback, CallbackQuery) and message_or_callback.message:
-                try:
-                    await message_or_callback.message.edit_text(
-                        MessageTemplate.get_purchase_menu_title(),
-                        reply_markup=builder.as_markup(),
-                        parse_mode="HTML"
-                    )
-                except Exception as e:
-                    self.logger.error(f"Error editing message: {e}")
-                    await message_or_callback.message.answer(
-                        "⭐ <b>Покупка звезд</b> ⭐\n\n"
-                        "🎯 <i>Выберите способ оплаты:</i>\n\n"
-                        f"💳 <i>Картой/Кошельком - оплата через Heleket</i>\n"
-                        f"💰 <i>С баланса - списание со счета</i>\n"
-                        f"💎 <i>Через Fragment - прямая покупка</i>\n\n"
-                        f"✨ <i>Каждая звезда имеет ценность!</i>",
-                        reply_markup=builder.as_markup(),
-                        parse_mode="HTML"
-                    )
+                success = await safe_edit_message(
+                    message_or_callback.message,
+                    MessageTemplate.get_purchase_menu_title(),
+                    reply_markup=builder.as_markup(),
+                    parse_mode="HTML"
+                )
+                if not success:
+                    self.logger.error("Failed to edit purchase menu message")
 
     async def _handle_start_command(self, message_or_callback: Union[Message, CallbackQuery], bot: Bot) -> None:
         """Обработка команды /start"""
@@ -349,19 +339,14 @@ class MessageHandler(BaseHandler):
             )
         else:
             if isinstance(message_or_callback, CallbackQuery) and message_or_callback.message:
-                try:
-                    await message_or_callback.message.edit_text(
-                        welcome_message,
-                        reply_markup=builder.as_markup(),
-                        parse_mode="HTML"
-                    )
-                except Exception as e:
-                    self.logger.error(f"Error editing message: {e}")
-                    await message_or_callback.message.answer(
-                        welcome_message,
-                        reply_markup=builder.as_markup(),
-                        parse_mode="HTML"
-                    )
+                success = await safe_edit_message(
+                    message_or_callback.message,
+                    welcome_message,
+                    reply_markup=builder.as_markup(),
+                    parse_mode="HTML"
+                )
+                if not success:
+                    self.logger.error("Failed to edit start menu message")
 
     async def _handle_help_command(self, message_or_callback: Union[Message, CallbackQuery], bot: Bot) -> None:
         """Обработка команды /help"""
@@ -371,11 +356,13 @@ class MessageHandler(BaseHandler):
             await message_or_callback.answer(help_message, parse_mode="HTML")
         else:
             if isinstance(message_or_callback, CallbackQuery) and message_or_callback.message:
-                try:
-                    await message_or_callback.message.edit_text(help_message, parse_mode="HTML")
-                except Exception as e:
-                    self.logger.error(f"Error editing message: {e}")
-                    await message_or_callback.message.answer(help_message, parse_mode="HTML")
+                success = await safe_edit_message(
+                    message_or_callback.message,
+                    help_message,
+                    parse_mode="HTML"
+                )
+                if not success:
+                    self.logger.error("Failed to edit help message")
 
     async def _handle_unknown_command(self, message: Message) -> None:
         """Обработка неизвестных текстовых команд"""
@@ -394,8 +381,13 @@ class MessageHandler(BaseHandler):
             limit_type: Тип лимита
         """
         try:
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
             remaining_time = await self.get_rate_limit_remaining_time(user_id, limit_type)
+            # DEBUG: Логирование для диагностики проблемы типизации
+            self.logger.debug(f"DEBUG: remaining_time type: {type(remaining_time)}, value: {remaining_time}")
+            self.logger.debug(f"DEBUG: remaining_time is None: {remaining_time is None}")
             
             if isinstance(message_or_callback, Message):
                 rate_limit_message = RateLimitMessages.get_rate_limit_message(limit_type, remaining_time, for_callback=False)

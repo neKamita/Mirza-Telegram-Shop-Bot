@@ -116,7 +116,9 @@ class PaymentCacheService(BaseCache):
     
     async def invalidate_payment_cache(self, payment_id: str) -> bool:
         keys = [f"invoice:{payment_id}", f"status:{payment_id}", f"details:{payment_id}", f"transaction:{payment_id}"]
-        success = all(await self.delete(key) for key in keys)
+        import asyncio
+        results = await asyncio.gather(*(self.delete(key) for key in keys), return_exceptions=True)
+        success = all(isinstance(result, bool) and result for result in results)
         if success:
             await self._remove_from_status_indices(payment_id)
         return success
@@ -137,7 +139,9 @@ class PaymentCacheService(BaseCache):
     async def extend_payment_cache(self, payment_id: str, additional_ttl: Optional[int] = None) -> bool:
         ttl = additional_ttl or self._default_ttl
         keys = [f"invoice:{payment_id}", f"status:{payment_id}", f"details:{payment_id}", f"transaction:{payment_id}"]
-        return all(await self.expire(key, ttl) for key in keys)
+        import asyncio
+        results = await asyncio.gather(*(self.expire(key, ttl) for key in keys), return_exceptions=True)
+        return all(isinstance(result, bool) and result for result in results)
     
     # Вспомогательные методы
     
