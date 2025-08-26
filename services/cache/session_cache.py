@@ -22,7 +22,7 @@ from redis.exceptions import (
 )
 
 from config.settings import settings
-from services.circuit_breaker import circuit_manager, CircuitConfigs
+from services.system.circuit_breaker import circuit_manager, CircuitConfigs
 
 
 class LocalCache:

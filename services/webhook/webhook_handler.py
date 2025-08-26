@@ -14,9 +14,9 @@ from starlette.responses import JSONResponse
 
 from repositories.user_repository import UserRepository
 from repositories.balance_repository import BalanceRepository
-from services.star_purchase_service import StarPurchaseService
-from services.user_cache import UserCache
-from services.payment_cache import PaymentCache
+from services.payment.star_purchase_service import StarPurchaseService
+from services.cache.user_cache import UserCache
+from services.cache.payment_cache import PaymentCache
 
 
 class WebhookHandler:

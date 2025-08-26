@@ -35,7 +35,7 @@ class FragmentService:
     def cookie_manager(self):
         """Ленивая инициализация FragmentCookieManager для избежания циклической зависимости"""
         if self._cookie_manager is None:
-            from services.fragment_cookie_manager import FragmentCookieManager
+            from services.fragment.fragment_cookie_manager import FragmentCookieManager
             self._cookie_manager = FragmentCookieManager(self)
         return self._cookie_manager
     

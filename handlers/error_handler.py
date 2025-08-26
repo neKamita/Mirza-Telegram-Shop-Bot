@@ -11,7 +11,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
 
 from .base_handler import BaseHandler
-from services.balance_service import BalanceService
+from services.balance.balance_service import BalanceService
 from utils.message_templates import MessageTemplate
 
 

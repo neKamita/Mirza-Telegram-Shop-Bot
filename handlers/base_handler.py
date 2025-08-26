@@ -9,12 +9,12 @@ from aiogram.types import Message, CallbackQuery
 from aiogram import Bot
 from core.interfaces import EventHandlerInterface
 from repositories.user_repository import UserRepository
-from services.payment_service import PaymentService
-from services.balance_service import BalanceService
-from services.star_purchase_service import StarPurchaseService
-from services.session_cache import SessionCache
-from services.rate_limit_cache import RateLimitCache
-from services.payment_cache import PaymentCache
+from services.payment.payment_service import PaymentService
+from services.balance.balance_service import BalanceService
+from services.payment.star_purchase_service import StarPurchaseService
+from services.cache.session_cache import SessionCache
+from services.cache.rate_limit_cache import RateLimitCache
+from services.cache.payment_cache import PaymentCache
 
 
 class BaseHandler(EventHandlerInterface, ABC):

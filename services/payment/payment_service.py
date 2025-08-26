@@ -10,7 +10,7 @@ import aiohttp
 import time
 from typing import Dict, Any, Optional
 from core.interfaces import PaymentInterface
-from services.payment_cache import PaymentCache
+from services.cache.payment_cache import PaymentCache
 
 
 class PaymentService(PaymentInterface):

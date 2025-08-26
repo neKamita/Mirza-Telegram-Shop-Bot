@@ -5,7 +5,7 @@ import pytest
 import asyncio
 from unittest.mock import patch, AsyncMock, Mock
 
-from services.fragment_service import FragmentService
+from services.fragment.fragment_service import FragmentService
 
 
 class TestFragmentService:

@@ -1,6 +1,6 @@
 import pytest
-from services.fragment_cookie_manager import FragmentCookieManager
-from services.fragment_service import FragmentService
+from services.fragment.fragment_cookie_manager import FragmentCookieManager
+from services.fragment.fragment_service import FragmentService
 
 def test_fragment_cookie_manager_init():
     """Test FragmentCookieManager initialization"""

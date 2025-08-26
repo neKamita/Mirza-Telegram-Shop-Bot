@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
 
-from services.rate_limit_cache import RateLimitCache
+from services.cache.rate_limit_cache import RateLimitCache
 from config.settings import settings
 
 

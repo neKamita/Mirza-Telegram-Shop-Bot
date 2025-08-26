@@ -27,16 +27,16 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from services.webhook_handler import WebhookHandler
+from services.webhook.webhook_handler import WebhookHandler
 from repositories.user_repository import UserRepository
 from repositories.balance_repository import BalanceRepository
-from services.payment_service import PaymentService
-from services.star_purchase_service import StarPurchaseService
-from services.user_cache import UserCache
-from services.payment_cache import PaymentCache
-from services.advanced_rate_limiter import AdvancedRateLimiter
-from services.health_service import HealthService
-from services.rate_limit_cache import RateLimitCache
+from services.payment.payment_service import PaymentService
+from services.payment.star_purchase_service import StarPurchaseService
+from services.cache.user_cache import UserCache
+from services.cache.payment_cache import PaymentCache
+from services.system.advanced_rate_limiter import AdvancedRateLimiter
+from services.system.health_service import HealthService
+from services.cache.rate_limit_cache import RateLimitCache
 from config.settings import settings
 
 # Настройка логирования
@@ -662,7 +662,7 @@ if __name__ == "__main__":
     }
 
     uvicorn.run(
-        "services.webhook_app:app",
+        "services.webhook.webhook_app:app",
         host=settings.webhook_host,
         port=settings.webhook_port,
         reload=settings.debug,

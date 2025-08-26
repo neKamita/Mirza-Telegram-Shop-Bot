@@ -14,10 +14,10 @@ from core.interfaces import StarPurchaseServiceInterface
 from repositories.user_repository import UserRepository
 from repositories.balance_repository import BalanceRepository
 from repositories.user_repository import TransactionType, TransactionStatus
-from services.payment_service import PaymentService
-from services.payment_cache import PaymentCache
-from services.user_cache import UserCache
-from services.fragment_service import FragmentService
+from services.payment.payment_service import PaymentService
+from services.cache.payment_cache import PaymentCache
+from services.cache.user_cache import UserCache
+from services.fragment.fragment_service import FragmentService
 
 
 class StarPurchaseService(StarPurchaseServiceInterface):

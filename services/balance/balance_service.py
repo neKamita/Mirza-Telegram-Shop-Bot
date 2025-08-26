@@ -9,7 +9,7 @@ from core.interfaces import BalanceServiceInterface
 from repositories.user_repository import UserRepository
 from repositories.balance_repository import BalanceRepository
 from repositories.user_repository import TransactionType, TransactionStatus
-from services.user_cache import UserCache
+from services.cache.user_cache import UserCache
 
 
 class BalanceService(BalanceServiceInterface):

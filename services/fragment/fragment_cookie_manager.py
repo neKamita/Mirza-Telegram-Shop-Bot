@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 
 # Импортируем FragmentService для типизации
-from services.fragment_service import FragmentService
+from services.fragment.fragment_service import FragmentService
 
 try:
     from selenium import webdriver

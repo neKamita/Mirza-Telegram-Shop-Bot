@@ -14,7 +14,7 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 from enum import Enum as PyEnum
 from config.settings import settings
-from services.user_cache import UserCache
+from services.cache.user_cache import UserCache
 
 
 class TransactionType(PyEnum):

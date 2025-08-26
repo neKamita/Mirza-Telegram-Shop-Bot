@@ -7,7 +7,7 @@ import logging
 from typing import Dict, Any, Set, Optional
 from datetime import datetime
 import redis.asyncio as redis
-from services.session_cache import SessionCache
+from services.cache.session_cache import SessionCache
 
 
 class WebSocketService:

@@ -5,7 +5,7 @@ import pytest
 import asyncio
 from unittest.mock import patch, AsyncMock, Mock
 
-from services.star_purchase_service import StarPurchaseService
+from services.payment.star_purchase_service import StarPurchaseService
 from repositories.user_repository import TransactionType, TransactionStatus
 
 
