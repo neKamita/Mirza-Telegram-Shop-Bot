@@ -84,11 +84,19 @@ def check_chrome_driver() -> bool:
     else:
         # Проверяем, установлен ли chromedriver-py
         try:
-            import chromedriver_py
-            print("✅ ChromeDriver доступен через chromedriver-py")
-            return True
+            import chromedriver_py  # type: ignore  # cspell:ignore chromedriver_py
+            # Получаем путь к chromedriver из chromedriver-py
+            auto_driver_path = chromedriver_py.binary_path
+            if os.path.exists(auto_driver_path):
+                print("✅ ChromeDriver доступен через chromedriver-py")
+                return True
+            else:
+                print("⚠️  ChromeDriver не найден по пути:", driver_path)
+                print("💡 Это может повлиять на автоматическое обновление cookies")
+                return False
         except ImportError:
             print("⚠️  ChromeDriver не найден по пути:", driver_path)
+            print("💡 Установите chromedriver-py или укажите правильный путь в CHROMEDRIVER_PATH")
             print("💡 Это может повлиять на автоматическое обновление cookies")
             return False
 

@@ -5,7 +5,7 @@ import logging
 from typing import Dict, Any, Optional, Union
 from datetime import datetime
 
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InaccessibleMessage
 from aiogram import Bot
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
@@ -44,8 +44,12 @@ class PaymentHandler(BaseHandler):
             amount: Сумма для пополнения (опционально)
         """
         if isinstance(message_or_callback, CallbackQuery):
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
         else:
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
             
         await self.safe_execute(
@@ -71,8 +75,12 @@ class PaymentHandler(BaseHandler):
             payment_id: ID платежа (опционально)
         """
         if isinstance(message_or_callback, CallbackQuery):
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
         else:
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
             
         await self.safe_execute(
@@ -102,7 +110,17 @@ class PaymentHandler(BaseHandler):
         
         # Если payment_id не указан, извлекаем из callback
         if not payment_id and isinstance(message_or_callback, CallbackQuery):
-            payment_id = message_or_callback.data.replace("check_recharge_", "")
+            if message_or_callback.data and message_or_callback.data.startswith("check_recharge_"):
+                payment_id = message_or_callback.data.replace("check_recharge_", "")
+
+        # Проверяем, что payment_id получен
+        if not payment_id:
+            self.logger.error("Payment ID is required but not provided")
+            if isinstance(message_or_callback, CallbackQuery):
+                await message_or_callback.answer("❌ Ошибка: ID платежа не найден", show_alert=True)
+            else:
+                await message_or_callback.answer("❌ Ошибка: ID платежа не найден")
+            return
 
         try:
             # Проверяем статус через сервис покупки звезд
@@ -166,16 +184,16 @@ class PaymentHandler(BaseHandler):
                     InlineKeyboardButton(text="⬅️ Назад", callback_data=f"cancel_recharge_{payment_id}")
                 )
 
-            if message:
+            if message and isinstance(message, Message):
                 try:
                     # Получаем текущий текст сообщения
                     existing_text = message.text or ""
-                    
+
                     # Находим и заменяем строку со статусом
                     lines = existing_text.split('\n')
                     new_lines = []
                     status_found = False
-                    
+
                     for line in lines:
                         if 'статус:' in line.lower():
                             # Заменяем строку статуса с добавлением времени
@@ -185,7 +203,7 @@ class PaymentHandler(BaseHandler):
                             status_found = True
                         else:
                             new_lines.append(line)
-                    
+
                     # Если строка статуса не найдена, добавляем ее
                     if not status_found:
                         # Находим позицию для вставки статуса (после ID транзакции)
@@ -202,9 +220,9 @@ class PaymentHandler(BaseHandler):
                             current_time = datetime.now().strftime("%H:%M:%S")
                             new_status = f"⏳ <b>статус: pending ({current_time})</b>"
                             new_lines.append(new_status)
-                    
+
                     updated_text = '\n'.join(new_lines)
-                    
+
                     if is_callback:
                         await message.edit_text(
                             updated_text,
@@ -245,8 +263,12 @@ class PaymentHandler(BaseHandler):
             amount: Сумма для пополнения
         """
         if isinstance(message_or_callback, CallbackQuery):
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
         else:
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
             
         await self.safe_execute(
@@ -296,7 +318,7 @@ class PaymentHandler(BaseHandler):
             transaction_id = recharge_result.get("transaction_id")
 
             if not result or "uuid" not in result or "url" not in result:
-                if message:
+                if message and isinstance(message, Message):
                     try:
                         if is_callback:
                             await message.edit_text("❌ Ошибка: некорректные данные от платежной системы")
@@ -321,11 +343,11 @@ class PaymentHandler(BaseHandler):
                 )
             )
 
-            if message:
+            if message and isinstance(message, Message):
                 try:
                     # Добавляем статус оплаты в сообщение
                     status_line = self._format_payment_status("pending")
-                    
+
                     if is_callback:
                         await message.edit_text(
                             f"✅ <b>Создан счет на пополнение баланса на {amount} TON</b> ✅\n\n"
@@ -385,6 +407,8 @@ class PaymentHandler(BaseHandler):
             bot: Экземпляр бота
             payment_id: UUID платежа для отмены
         """
+        if not callback.from_user or not callback.from_user.id:
+            return
         user_id = callback.from_user.id
         
         await self.safe_execute(
@@ -432,7 +456,7 @@ class PaymentHandler(BaseHandler):
                 )
                 
                 try:
-                    if callback.message:
+                    if callback.message and isinstance(callback.message, Message):
                         await callback.message.edit_text(
                             "❌ <b>Инвойс отменен</b> ❌\n\n"
                             "💳 <b>Выберите сумму для пополнения</b> 💳\n\n"
@@ -477,7 +501,7 @@ class PaymentHandler(BaseHandler):
         """
         # Обработка сообщений о пополнении
         if message.text and ("пополнение" in message.text.lower() or "recharge" in message.text.lower()):
-            await self.create_recharge(message, bot)
+            await self.show_recharge_menu(message, bot)
         else:
             await message.answer("❓ <b>Неизвестная команда</b> ❓\n\n"
                                "🔍 <i>Пожалуйста, используйте доступные команды</i>\n\n"
@@ -493,6 +517,8 @@ class PaymentHandler(BaseHandler):
             bot: Экземпляр бота
         """
         # Проверяем rate limit для всех callback операций
+        if not callback.from_user or not callback.from_user.id:
+            return
         user_id = callback.from_user.id
         if not await self.check_rate_limit(user_id, "operation", 20, 60):
             self.logger.warning(f"Rate limit exceeded for user {user_id} in payment handler")
@@ -515,7 +541,7 @@ class PaymentHandler(BaseHandler):
             )
             
             try:
-                if callback.message:
+                if callback.message and isinstance(callback.message, Message):
                     await callback.message.edit_text(
                         "💳 <b>Выберите сумму для пополнения</b> 💳\n\n"
                         "🎯 <i>Доступные варианты:</i>\n\n"
@@ -532,17 +558,22 @@ class PaymentHandler(BaseHandler):
             except Exception as e:
                 self.logger.error(f"Error showing recharge menu: {e}")
                 await callback.answer("❌ <b>Ошибка при отображении меню</b> ❓", show_alert=True)
-        elif callback.data.startswith("check_recharge_"):
+        elif callback.data and callback.data.startswith("check_recharge_"):
             payment_id = callback.data.replace("check_recharge_", "")
             await self.check_recharge_status(callback, bot, payment_id)
-        elif callback.data.startswith("cancel_recharge_"):
+        elif callback.data and callback.data.startswith("cancel_recharge_"):
             payment_id = callback.data.replace("cancel_recharge_", "")
             await self.cancel_specific_recharge(callback, bot, payment_id)
-        elif callback.data in ["recharge_10", "recharge_50", "recharge_100", "recharge_500"]:
-            amount = float(callback.data.replace("recharge_", ""))
-            await self.create_recharge(callback, bot, amount)
+        elif callback.data and callback.data.replace("recharge_", "").replace(".", "").isdigit():
+            amount_str = callback.data.replace("recharge_", "")
+            try:
+                amount = float(amount_str)
+                await self.create_recharge(callback, bot, amount)
+            except ValueError:
+                self.logger.error(f"Invalid amount in callback data: {callback.data}")
+                await callback.answer("❌ Неверная сумма", show_alert=True)
         elif callback.data == "back_to_recharge":
-            await self.create_recharge(callback, bot)
+            await self.show_recharge_menu(callback, bot)
         elif callback.data == "recharge_custom":
             # Отменяем все pending пополнения пользователя при возврате в меню
             try:
@@ -567,7 +598,7 @@ class PaymentHandler(BaseHandler):
             )
             
             try:
-                if callback.message:
+                if callback.message and isinstance(callback.message, Message):
                     await callback.message.edit_text(
                         "💳 <b>Выберите сумму для пополнения</b> 💳\n\n"
                         "🎯 <i>Доступные варианты:</i>\n\n"
@@ -599,6 +630,8 @@ class PaymentHandler(BaseHandler):
             limit_type: Тип лимита
         """
         try:
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                return
             user_id = message_or_callback.from_user.id
             remaining_time = await self.get_rate_limit_remaining_time(user_id, limit_type)
             

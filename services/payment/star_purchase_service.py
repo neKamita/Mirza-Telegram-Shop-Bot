@@ -191,7 +191,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
         """Покупка звезд через Telegram Fragment API"""
         try:
             # Получаем информацию о пользователе из базы данных
-            user_data = await self.user_repository.get_user_by_id(user_id)
+            user_data = await self.user_repository.get_user(user_id)
             if not user_data:
                 return {
                     "status": "failed",
@@ -724,18 +724,21 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 }
             
             # Обновляем статус транзакции асинхронно (не ждем)
-            asyncio.create_task(
-                self.balance_repository.update_transaction_status(
-                    transaction_id,
-                    TransactionStatus.COMPLETED,
-                    metadata={
-                        "completed_at": datetime.utcnow().isoformat(),
-                        "stars_count": amount,
-                        "purchase_type": "balance",
-                        "balance_updated": True
-                    }
+            if isinstance(transaction_id, int):
+                asyncio.create_task(
+                    self.balance_repository.update_transaction_status(
+                        transaction_id,
+                        TransactionStatus.COMPLETED,
+                        metadata={
+                            "completed_at": datetime.utcnow().isoformat(),
+                            "stars_count": amount,
+                            "purchase_type": "balance",
+                            "balance_updated": True
+                        }
+                    )
                 )
-            )
+            else:
+                self.logger.error(f"Failed to update transaction status: transaction_id is not int, got {type(transaction_id)}: {transaction_id}")
             
             # Обновляем кеш с новым балансом асинхронно (не ждем)
             new_balance = current_balance - amount

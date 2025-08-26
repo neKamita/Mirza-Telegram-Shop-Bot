@@ -3,7 +3,8 @@
 """
 import logging
 from abc import ABC
-from typing import Any, Dict, Optional, Union
+from datetime import datetime, timezone
+from typing import Any, Awaitable, Callable, Dict, Optional, Union
 
 from aiogram.types import Message, CallbackQuery
 from aiogram import Bot
@@ -100,22 +101,21 @@ class BaseHandler(EventHandlerInterface, ABC):
                 str(user_id), limit_type, window=60, limit=10
             )
             if info and info.get('reset_time'):
-                from datetime import datetime
                 reset_time = info['reset_time']
                 if isinstance(reset_time, str):
                     reset_time = datetime.fromisoformat(reset_time)
-                remaining = (reset_time - datetime.utcnow()).total_seconds()
+                remaining = (reset_time - datetime.now(timezone.utc)).total_seconds()
                 return max(0, int(remaining))
             return 60  # Возвращаем стандартное время окна
         except Exception as e:
             self.logger.error(f"Error getting rate limit remaining time: {e}")
             return 60
 
-    async def safe_execute(self, 
-                          user_id: int, 
+    async def safe_execute(self,
+                          user_id: int,
                           operation: str,
-                          func: callable,
-                          *args, 
+                          func: Callable[..., Awaitable[Any]],
+                          *args,
                           **kwargs) -> Any:
         """
         Безопасное выполнение операции с обработкой ошибок и валидацией

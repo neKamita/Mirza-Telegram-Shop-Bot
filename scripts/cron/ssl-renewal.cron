@@ -1,0 +1,12 @@
+# SSL Certificate Auto-Renewal Cron Job
+# This cron job runs the SSL renewal script weekly
+# Place this file in /etc/cron.d/ or add to crontab
+
+# Run SSL renewal check every Monday at 3:00 AM
+0 3 * * 1 /path/to/project/scripts/ssl-renewal.sh check yourdomain.com && /path/to/project/scripts/ssl-renewal.sh renew yourdomain.com admin@yourdomain.com
+
+# Alternative: Run daily check with 30-day threshold
+# 0 3 * * * /path/to/project/scripts/ssl-renewal.sh check yourdomain.com -t 30 && /path/to/project/scripts/ssl-renewal.sh renew yourdomain.com admin@yourdomain.com
+
+# Log rotation for SSL renewal logs
+# 0 0 * * 0 find /path/to/project/logs -name "ssl-renewal.log.*" -mtime +30 -delete

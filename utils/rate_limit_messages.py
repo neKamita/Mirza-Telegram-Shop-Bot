@@ -1,14 +1,14 @@
 """
 Сообщения для уведомления пользователей о rate limiting
 """
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
 class RateLimitMessages:
     """Класс для генерации сообщений о превышении лимитов запросов"""
     
     @staticmethod
-    def get_rate_limit_message(limit_type: str, remaining_time: int = None, for_callback: bool = False) -> str:
+    def get_rate_limit_message(limit_type: str, remaining_time: Optional[int] = None, for_callback: bool = False) -> str:
         """
         Получение сообщения о превышении rate limit
         

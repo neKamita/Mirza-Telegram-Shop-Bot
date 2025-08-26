@@ -16,7 +16,7 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from pathlib import Path
 
 from fastapi import FastAPI, Request, HTTPException, Depends, status
@@ -251,30 +251,73 @@ async def initialize_services():
         payment_cache = None
 
         if settings.redis_url:
+            logger.info("Starting Redis initialization process", extra={
+                "redis_url": settings.redis_url,
+                "is_redis_cluster": settings.is_redis_cluster,
+                "redis_cluster_nodes": settings.redis_cluster_nodes if settings.is_redis_cluster else None
+            })
+
             try:
+                logger.info("Step 1: Importing Redis modules")
                 import redis.asyncio as redis
                 from redis.cluster import RedisCluster
+                logger.info("Step 1 completed: Redis modules imported")
 
                 if settings.is_redis_cluster:
+                    logger.info("Step 2: Creating Redis cluster client")
+                    from redis.cluster import ClusterNode
                     startup_nodes = [
-                        {"host": host.split(":")[0], "port": int(host.split(":")[1])}
+                        ClusterNode(host.split(":")[0], int(host.split(":")[1]))
                         for host in settings.redis_cluster_nodes.split(",")
                     ]
+                    logger.info("Step 2a: Created startup nodes", extra={"startup_nodes": [(n.host, n.port) for n in startup_nodes]})
+
                     redis_client = RedisCluster(
                         startup_nodes=startup_nodes,
                         password=settings.redis_password,
                         decode_responses=False,
                         skip_full_coverage_check=True
                     )
+                    logger.info("Step 2 completed: RedisCluster client created")
                 else:
+                    logger.info("Step 3: Creating Redis client from URL")
                     redis_client = redis.from_url(settings.redis_url, decode_responses=False)
+                    logger.info("Step 3 completed: Redis client created")
 
-                await redis_client.ping()
+                logger.info("Step 4: Testing Redis connection with ping")
+                if settings.is_redis_cluster:
+                    # Для RedisCluster ping() возвращает bool, а не корутину
+                    ping_result = redis_client.ping()
+                    logger.info("Step 4 completed: Redis ping successful", extra={"ping_result": ping_result})
+                else:
+                    # Для обычного Redis ping() возвращает корутину
+                    ping_result = await redis_client.ping()
+                    logger.info("Step 4 completed: Redis ping successful", extra={"ping_result": ping_result})
+
+                logger.info("Step 5: Creating UserCache instance")
                 user_cache = UserCache(redis_client)
+                logger.info("Step 5 completed: UserCache created successfully")
+
+                logger.info("Step 6: Creating PaymentCache instance")
                 payment_cache = PaymentCache(redis_client)
-                logger.info("Redis cache initialized successfully")
+                logger.info("Step 6 completed: PaymentCache created successfully")
+
+                logger.info("Redis cache initialization completed successfully")
+
             except Exception as e:
-                logger.error("Failed to initialize Redis cache", extra={"error": str(e)})
+                logger.error("Redis initialization failed", extra={
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "redis_url": settings.redis_url,
+                    "is_redis_cluster": settings.is_redis_cluster
+                })
+                import traceback
+                logger.error("Full Redis initialization traceback", extra={"traceback": traceback.format_exc()})
+                # Don't re-raise, continue with other services
+                logger.warning("Continuing without Redis cache - using graceful degradation")
+                redis_client = None
+                user_cache = None
+                payment_cache = None
 
         # Инициализация сервисов
         balance_repository = BalanceRepository(user_repository.async_session)
@@ -313,7 +356,7 @@ async def initialize_services():
         health_service = None
         if redis_client:
             try:
-                health_service = HealthService(redis_client)
+                health_service = HealthService(redis_client)  # type: ignore
                 logger.info("Health service initialized")
             except Exception as e:
                 logger.error("Failed to initialize health service", extra={"error": str(e)})
@@ -345,11 +388,14 @@ async def cleanup_services():
 
     try:
         # Закрытие соединений
-        if 'user_repository' in services:
-            await services['user_repository'].close()
-
         if 'user_cache' in services and services['user_cache']:
             await services['user_cache'].close()
+
+        if 'payment_cache' in services and services['payment_cache']:
+            await services['payment_cache'].close()
+
+        if 'redis_client' in services and services['redis_client']:
+            await services['redis_client'].close()
 
         logger.info("Webhook services cleaned up successfully")
 
@@ -406,7 +452,7 @@ app.add_middleware(SimpleRateLimitMiddleware)
 async def health_check():
     """Основной health check endpoint"""
     try:
-        health_data = {
+        health_data: Dict[str, Any] = {
             "status": "healthy",
             "service": "webhook-handler",
             "domain": settings.production_domain,
@@ -416,7 +462,7 @@ async def health_check():
         }
 
         # Проверка сервисов
-        services_status = {}
+        services_status: Dict[str, Any] = {}
         if 'health_service' in services and services['health_service']:
             services_status = await services['health_service'].get_health_status()
 

@@ -113,28 +113,43 @@ class FragmentCookieManager:
             self.logger.info("Refreshing Fragment cookies...")
             
             # Настройка headless браузера
-            chrome_options = Options()
+            if not SELENIUM_AVAILABLE:
+                self.logger.error("Selenium not available")
+                return None
+
+            chrome_options = webdriver.ChromeOptions()
             chrome_options.add_argument("--headless")
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--window-size=1920,1080")
-            
+
             # Создаем драйвер с учетом разных способов установки chromedriver
+            driver = None
             if CHROMEDRIVER_PY_AVAILABLE and binary_path:
                 # Используем chromedriver-py
-                service = ChromeService(executable_path=binary_path)
-                driver = webdriver.Chrome(service=service, options=chrome_options)
+                try:
+                    service = ChromeService(executable_path=binary_path)
+                    driver = webdriver.Chrome(service=service, options=chrome_options)
+                except Exception as e:
+                    self.logger.warning(f"Failed to create driver with chromedriver-py: {e}")
             else:
                 # Используем системный chromedriver
                 driver_path = os.getenv("CHROMEDRIVER_PATH", "/usr/local/bin/chromedriver")
-                service = ChromeService(executable_path=driver_path)
-                driver = webdriver.Chrome(service=service, options=chrome_options)
-            
+                try:
+                    service = ChromeService(executable_path=driver_path)
+                    driver = webdriver.Chrome(service=service, options=chrome_options)
+                except Exception as e:
+                    self.logger.warning(f"Failed to create driver with system chromedriver: {e}")
+
+            if driver is None:
+                self.logger.error("Failed to create Chrome driver")
+                return None
+
             try:
                 # Переходим на страницу Fragment
                 driver.get("https://fragment.com")
-                
+
                 # Ждем загрузки страницы
                 wait = WebDriverWait(driver, 10)
                 wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))

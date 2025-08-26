@@ -4,7 +4,7 @@
 import logging
 from typing import Dict, Any, Optional, Union
 
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InaccessibleMessage
 from aiogram import Bot
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
@@ -36,10 +36,12 @@ class BalanceHandler(BaseHandler):
             message_or_callback: Сообщение или callback запрос
             bot: Экземпляр бота
         """
-        if isinstance(message_or_callback, CallbackQuery):
-            user_id = message_or_callback.from_user.id
-        else:
-            user_id = message_or_callback.from_user.id
+        # Проверяем наличие пользователя перед извлечением ID
+        if not message_or_callback.from_user or not message_or_callback.from_user.id:
+            self.logger.warning("User information is missing in show_balance")
+            return
+
+        user_id = message_or_callback.from_user.id
             
         await self.safe_execute(
             user_id=user_id,
@@ -96,7 +98,8 @@ class BalanceHandler(BaseHandler):
                     f"💎 <i>Каждая звезда имеет ценность!</i>"
                 )
 
-                if message:
+                # Проверяем, что сообщение доступно для редактирования
+                if message and hasattr(message, 'edit_text') and not isinstance(message, InaccessibleMessage):
                     try:
                         if is_callback:
                             await message.edit_text(
@@ -112,7 +115,17 @@ class BalanceHandler(BaseHandler):
                             )
                     except Exception as e:
                         self.logger.error(f"Error editing/answering message in show_balance: {e}")
-                        await message.answer(
+                        # В случае ошибки пытаемся отправить новое сообщение
+                        if hasattr(message_or_callback, 'answer'):
+                            await message_or_callback.answer(
+                                balance_message,
+                                reply_markup=builder.as_markup(),
+                                parse_mode="HTML"
+                            )
+                else:
+                    # Если сообщение недоступно, отправляем новое
+                    if hasattr(message_or_callback, 'answer'):
+                        await message_or_callback.answer(
                             balance_message,
                             reply_markup=builder.as_markup(),
                             parse_mode="HTML"
@@ -124,7 +137,8 @@ class BalanceHandler(BaseHandler):
                     InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
                 )
 
-                if message:
+                # Проверяем, что сообщение доступно для редактирования
+                if message and hasattr(message, 'edit_text') and not isinstance(message, InaccessibleMessage):
                     try:
                         if is_callback:
                             await message.edit_text(
@@ -144,7 +158,19 @@ class BalanceHandler(BaseHandler):
                             )
                     except Exception as e:
                         self.logger.error(f"Error editing/answering message in show_balance error case: {e}")
-                        await message.answer(
+                        # В случае ошибки пытаемся отправить новое сообщение
+                        if hasattr(message_or_callback, 'answer'):
+                            await message_or_callback.answer(
+                                "❌ <b>Не удалось получить баланс</b> ❌\n\n"
+                                f"🔧 <i>Пожалуйста, попробуйте позже</i>\n\n"
+                                f"💡 <i>Если проблема сохраняется, обратитесь в поддержку</i>",
+                                reply_markup=builder.as_markup(),
+                                parse_mode="HTML"
+                            )
+                else:
+                    # Если сообщение недоступно, отправляем новое
+                    if hasattr(message_or_callback, 'answer'):
+                        await message_or_callback.answer(
                             "❌ <b>Не удалось получить баланс</b> ❌\n\n"
                             f"🔧 <i>Пожалуйста, попробуйте позже</i>\n\n"
                             f"💡 <i>Если проблема сохраняется, обратитесь в поддержку</i>",
@@ -170,10 +196,12 @@ class BalanceHandler(BaseHandler):
             message_or_callback: Сообщение или callback запрос
             bot: Экземпляр бота
         """
-        if isinstance(message_or_callback, CallbackQuery):
-            user_id = message_or_callback.from_user.id
-        else:
-            user_id = message_or_callback.from_user.id
+        # Проверяем наличие пользователя перед извлечением ID
+        if not message_or_callback.from_user or not message_or_callback.from_user.id:
+            self.logger.warning("User information is missing in show_balance")
+            return
+
+        user_id = message_or_callback.from_user.id
             
         # Проверяем rate limit перед выполнением операции (20 операций в минуту)
         if not await self.check_rate_limit(user_id, "operation", 20, 60):
@@ -217,7 +245,8 @@ class BalanceHandler(BaseHandler):
                     InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_balance")
                 )
 
-                if message:
+                # Проверяем, что сообщение доступно для редактирования
+                if message and hasattr(message, 'edit_text') and not isinstance(message, InaccessibleMessage):
                     try:
                         if is_callback:
                             await message.edit_text(
@@ -237,7 +266,19 @@ class BalanceHandler(BaseHandler):
                             )
                     except Exception as e:
                         self.logger.error(f"Error editing/answering message in show_balance_history no transactions: {e}")
-                        await message.answer(
+                        # В случае ошибки пытаемся отправить новое сообщение
+                        if hasattr(message_or_callback, 'answer'):
+                            await message_or_callback.answer(
+                                "📊 <b>У вас пока нет истории транзакций</b> 📊\n\n"
+                                f"🔍 <i>Ваши транзакции будут отображаться здесь</i>\n\n"
+                                f"💡 <i>Совершите первую покупку, чтобы увидеть историю</i>",
+                                reply_markup=builder.as_markup(),
+                                parse_mode="HTML"
+                            )
+                else:
+                    # Если сообщение недоступно, отправляем новое
+                    if hasattr(message_or_callback, 'answer'):
+                        await message_or_callback.answer(
                             "📊 <b>У вас пока нет истории транзакций</b> 📊\n\n"
                             f"🔍 <i>Ваши транзакции будут отображаться здесь</i>\n\n"
                             f"💡 <i>Совершите первую покупку, чтобы увидеть историю</i>",
@@ -344,7 +385,8 @@ class BalanceHandler(BaseHandler):
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_balance")
             )
 
-            if message:
+            # Проверяем, что сообщение доступно для редактирования
+            if message and hasattr(message, 'edit_text') and not isinstance(message, InaccessibleMessage):
                 try:
                     if is_callback:
                         await message.edit_text(
@@ -360,7 +402,17 @@ class BalanceHandler(BaseHandler):
                         )
                 except Exception as e:
                     self.logger.error(f"Error editing/answering message in show_balance_history success case: {e}")
-                    await message.answer(
+                    # В случае ошибки пытаемся отправить новое сообщение
+                    if hasattr(message_or_callback, 'answer'):
+                        await message_or_callback.answer(
+                            message_text,
+                            reply_markup=builder.as_markup(),
+                            parse_mode="HTML"
+                        )
+            else:
+                # Если сообщение недоступно, отправляем новое
+                if hasattr(message_or_callback, 'answer'):
+                    await message_or_callback.answer(
                         message_text,
                         reply_markup=builder.as_markup(),
                         parse_mode="HTML"
@@ -422,6 +474,11 @@ class BalanceHandler(BaseHandler):
             limit_type: Тип лимита
         """
         try:
+            # Проверяем наличие пользователя перед извлечением ID
+            if not message_or_callback.from_user or not message_or_callback.from_user.id:
+                self.logger.warning("User information is missing in _show_rate_limit_message")
+                return
+
             user_id = message_or_callback.from_user.id
             remaining_time = await self.get_rate_limit_remaining_time(user_id, limit_type)
             

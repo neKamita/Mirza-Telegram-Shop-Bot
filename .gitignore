@@ -152,7 +152,8 @@ logs/
 *.log
 
 # SSL certificates
-nginx/ssl/
+ssl/
+*.pem
 
 # Local development
 .env.local
@@ -176,8 +177,6 @@ cloudflared.json
 .cache/
 
 *.pem
-*.pem
-/ssl
 INSTRUCTIONS.md
 REDIS_PORTS_CHANGE_INSTRUCTIONS.md
 .kilocode/rules/byterover-rules.md

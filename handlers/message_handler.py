@@ -4,7 +4,7 @@
 import logging
 import re
 from typing import Dict, Any, Optional, Union, List
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InaccessibleMessage
 from aiogram import Bot, Dispatcher
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
@@ -187,11 +187,12 @@ class MessageHandler(BaseHandler):
                 await self._handle_unknown_callback(callback)
                 
         except Exception as e:
-            self.logger.error(f"Error handling callback {callback.data} for user {callback.from_user.id}: {e}")
+            user_id = callback.from_user.id if callback.from_user else None
+            self.logger.error(f"Error handling callback {callback.data} for user {user_id}: {e}")
             await self.error_handler.show_error_with_suggestions(
                 callback,
                 self.error_handler.categorize_error(str(e)),
-                {"user_id": callback.from_user.id, "error": str(e)}
+                {"user_id": user_id, "error": str(e)}
             )
 
     def register_handlers(self, dp: Dispatcher) -> None:
@@ -225,8 +226,13 @@ class MessageHandler(BaseHandler):
                 self.logger.warning("Message or callback has no user information")
                 return False
                 
-            user_id = message_or_callback.from_user.id
-            
+            user_id = message_or_callback.from_user.id if message_or_callback.from_user else None
+
+            # Проверка наличия user_id
+            if user_id is None:
+                self.logger.warning("Message or callback has no user information")
+                return False
+
             # Проверка пользователя в базе данных
             if not await self.validate_user(user_id):
                 self.logger.error(f"User validation failed for {user_id}")
@@ -309,23 +315,46 @@ class MessageHandler(BaseHandler):
         else:
             if isinstance(message_or_callback, CallbackQuery) and message_or_callback.message:
                 try:
-                    await message_or_callback.message.edit_text(
-                        MessageTemplate.get_purchase_menu_title(),
-                        reply_markup=builder.as_markup(),
-                        parse_mode="HTML"
-                    )
+                    if not isinstance(message_or_callback.message, InaccessibleMessage):
+                        await message_or_callback.message.edit_text(
+                            MessageTemplate.get_purchase_menu_title(),
+                            reply_markup=builder.as_markup(),
+                            parse_mode="HTML"
+                        )
+                    else:
+                        # Сообщение недоступно, отправляем новое
+                        await bot.send_message(
+                            chat_id=message_or_callback.message.chat.id,
+                            text=MessageTemplate.get_purchase_menu_title(),
+                            reply_markup=builder.as_markup(),
+                            parse_mode="HTML"
+                        )
                 except Exception as e:
                     self.logger.error(f"Error editing message: {e}")
-                    await message_or_callback.message.answer(
-                        "⭐ <b>Покупка звезд</b> ⭐\n\n"
-                        "🎯 <i>Выберите способ оплаты:</i>\n\n"
-                        f"💳 <i>Картой/Кошельком - оплата через Heleket</i>\n"
-                        f"💰 <i>С баланса - списание со счета</i>\n"
-                        f"💎 <i>Через Fragment - прямая покупка</i>\n\n"
-                        f"✨ <i>Каждая звезда имеет ценность!</i>",
-                        reply_markup=builder.as_markup(),
-                        parse_mode="HTML"
-                    )
+                    if not isinstance(message_or_callback.message, InaccessibleMessage):
+                        await message_or_callback.message.answer(
+                            "⭐ <b>Покупка звезд</b> ⭐\n\n"
+                            "🎯 <i>Выберите способ оплаты:</i>\n\n"
+                            f"💳 <i>Картой/Кошельком - оплата через Heleket</i>\n"
+                            f"💰 <i>С баланса - списание со счета</i>\n"
+                            f"💎 <i>Через Fragment - прямая покупка</i>\n\n"
+                            f"✨ <i>Каждая звезда имеет ценность!</i>",
+                            reply_markup=builder.as_markup(),
+                            parse_mode="HTML"
+                        )
+                    else:
+                        # Сообщение недоступно, отправляем новое
+                        await bot.send_message(
+                            chat_id=message_or_callback.message.chat.id,
+                            text="⭐ <b>Покупка звезд</b> ⭐\n\n"
+                                 "🎯 <i>Выберите способ оплаты:</i>\n\n"
+                                 f"💳 <i>Картой/Кошельком - оплата через Heleket</i>\n"
+                                 f"💰 <i>С баланса - списание со счета</i>\n"
+                                 f"💎 <i>Через Fragment - прямая покупка</i>\n\n"
+                                 f"✨ <i>Каждая звезда имеет ценность!</i>",
+                            reply_markup=builder.as_markup(),
+                            parse_mode="HTML"
+                        )
 
     async def _handle_start_command(self, message_or_callback: Union[Message, CallbackQuery], bot: Bot) -> None:
         """Обработка команды /start"""
@@ -350,18 +379,36 @@ class MessageHandler(BaseHandler):
         else:
             if isinstance(message_or_callback, CallbackQuery) and message_or_callback.message:
                 try:
-                    await message_or_callback.message.edit_text(
-                        welcome_message,
-                        reply_markup=builder.as_markup(),
-                        parse_mode="HTML"
-                    )
+                    if not isinstance(message_or_callback.message, InaccessibleMessage):
+                        await message_or_callback.message.edit_text(
+                            welcome_message,
+                            reply_markup=builder.as_markup(),
+                            parse_mode="HTML"
+                        )
+                    else:
+                        # Сообщение недоступно, отправляем новое
+                        await bot.send_message(
+                            chat_id=message_or_callback.message.chat.id,
+                            text=welcome_message,
+                            reply_markup=builder.as_markup(),
+                            parse_mode="HTML"
+                        )
                 except Exception as e:
                     self.logger.error(f"Error editing message: {e}")
-                    await message_or_callback.message.answer(
-                        welcome_message,
-                        reply_markup=builder.as_markup(),
-                        parse_mode="HTML"
-                    )
+                    if not isinstance(message_or_callback.message, InaccessibleMessage):
+                        await message_or_callback.message.answer(
+                            welcome_message,
+                            reply_markup=builder.as_markup(),
+                            parse_mode="HTML"
+                        )
+                    else:
+                        # Сообщение недоступно, отправляем новое
+                        await bot.send_message(
+                            chat_id=message_or_callback.message.chat.id,
+                            text=welcome_message,
+                            reply_markup=builder.as_markup(),
+                            parse_mode="HTML"
+                        )
 
     async def _handle_help_command(self, message_or_callback: Union[Message, CallbackQuery], bot: Bot) -> None:
         """Обработка команды /help"""
@@ -372,7 +419,15 @@ class MessageHandler(BaseHandler):
         else:
             if isinstance(message_or_callback, CallbackQuery) and message_or_callback.message:
                 try:
-                    await message_or_callback.message.edit_text(help_message, parse_mode="HTML")
+                    if not isinstance(message_or_callback.message, InaccessibleMessage):
+                        await message_or_callback.message.edit_text(help_message, parse_mode="HTML")
+                    else:
+                        # Сообщение недоступно, отправляем новое
+                        await bot.send_message(
+                            chat_id=message_or_callback.message.chat.id,
+                            text=help_message,
+                            parse_mode="HTML"
+                        )
                 except Exception as e:
                     self.logger.error(f"Error editing message: {e}")
                     await message_or_callback.message.answer(help_message, parse_mode="HTML")
@@ -394,7 +449,10 @@ class MessageHandler(BaseHandler):
             limit_type: Тип лимита
         """
         try:
-            user_id = message_or_callback.from_user.id
+            user_id = message_or_callback.from_user.id if message_or_callback.from_user else None
+            if user_id is None:
+                self.logger.error("Cannot show rate limit message: no user information")
+                return
             remaining_time = await self.get_rate_limit_remaining_time(user_id, limit_type)
             
             if isinstance(message_or_callback, Message):

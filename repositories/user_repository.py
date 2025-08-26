@@ -3,16 +3,16 @@
 """
 import json
 import logging
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import select, insert, update
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, cast
 from core.interfaces import DatabaseInterface
 from sqlalchemy import Column, Integer, Boolean, DateTime, String, Numeric, ForeignKey, Enum
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 from datetime import datetime
 from enum import Enum as PyEnum
+from decimal import Decimal
 from config.settings import settings
 from services.cache.user_cache import UserCache
 
@@ -55,12 +55,12 @@ class Balance(Base):
     """Модель баланса пользователя"""
     __tablename__ = "balances"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
-    amount = Column(Numeric(10, 2), nullable=False, default=0.0)  # Баланс в виде числа с плавающей точкой
-    currency = Column(String(3), nullable=False, default="TON")    # Валюта (TON, USD и т.д.)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=0.0)  # Баланс в виде числа с плавающей точкой
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="TON")    # Валюта (TON, USD и т.д.)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Связь с пользователем
     user = relationship("User", back_populates="balances")
@@ -73,17 +73,17 @@ class Transaction(Base):
     """Модель транзакций пользователя"""
     __tablename__ = "transactions"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
-    transaction_type = Column(Enum(TransactionType), nullable=False, index=True)
-    status = Column(Enum(TransactionStatus), nullable=False, default=TransactionStatus.PENDING, index=True)
-    amount = Column(Numeric(10, 2), nullable=False)  # Сумма транзакции
-    currency = Column(String(3), nullable=False, default="TON")
-    description = Column(String(500), nullable=True)  # Описание транзакции
-    external_id = Column(String(100), nullable=True, unique=True, index=True)  # ID внешней системы (Heleket)
-    transaction_metadata = Column(String(1000), nullable=True)  # Дополнительные данные в JSON формате
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    transaction_type: Mapped[TransactionType] = mapped_column(Enum(TransactionType), nullable=False, index=True)
+    status: Mapped[TransactionStatus] = mapped_column(Enum(TransactionStatus), nullable=False, default=TransactionStatus.PENDING, index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)  # Сумма транзакции
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="TON")
+    description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Описание транзакции
+    external_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, unique=True, index=True)  # ID внешней системы (Heleket)
+    transaction_metadata: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)  # Дополнительные данные в JSON формате
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Связь с пользователем
     user = relationship("User", back_populates="transactions")
@@ -119,7 +119,7 @@ class UserRepository(DatabaseInterface):
             pool_pre_ping=True,
             connect_args=connect_args
         )
-        self.async_session = sessionmaker(
+        self.async_session = async_sessionmaker(
             self.engine,
             class_=AsyncSession,
             expire_on_commit=False
@@ -206,14 +206,14 @@ class UserRepository(DatabaseInterface):
             if balance:
                 balance_data = {
                     "user_id": user_id,
-                    "balance": float(balance.amount),
+                    "balance": cast(float, balance.amount),
                     "currency": balance.currency,
-                    "updated_at": balance.updated_at.isoformat() if balance.updated_at else None
+                    "updated_at": balance.updated_at.isoformat() if balance.updated_at is not None else None
                 }
 
                 # Кешируем результат
                 if self.user_cache:
-                    await self.user_cache.cache_user_balance(user_id, int(balance.amount))
+                    await self.user_cache.cache_user_balance(user_id, int(balance.amount.quantize(Decimal('1'))))
 
                 return balance_data
             else:
@@ -256,13 +256,21 @@ class UserRepository(DatabaseInterface):
                 # Получаем текущий баланс
                 balance = await session.get(Balance, user_id)
                 if not balance:
-                    await self.create_user_balance(user_id, 0)
+                    success = await self.create_user_balance(user_id, 0)
+                    if not success:
+                        self.logger.error(f"Failed to create balance for user {user_id}")
+                        return False
                     balance = await session.get(Balance, user_id)
+
+                # Проверяем, что баланс существует после создания
+                if not balance:
+                    self.logger.error(f"Balance not found for user {user_id} after creation attempt")
+                    return False
 
                 # Выполняем операцию (преобразуем float в Decimal для совместимости)
                 from decimal import Decimal
                 amount_decimal = Decimal(str(amount))
-                
+
                 if operation == "add":
                     balance.amount += amount_decimal
                 elif operation == "subtract":
@@ -277,7 +285,7 @@ class UserRepository(DatabaseInterface):
 
                 # Инвалидируем кеш пользователя
                 if self.user_cache:
-                    await self.user_cache.update_user_balance(user_id, int(balance.amount))
+                    await self.user_cache.update_user_balance(user_id, int(balance.amount.quantize(Decimal('1'))))
 
                 return True
             except Exception as e:
@@ -346,8 +354,8 @@ class UserRepository(DatabaseInterface):
                     "currency": transaction.currency,
                     "description": transaction.description,
                     "external_id": transaction.external_id,
-                    "created_at": transaction.created_at.isoformat() if transaction.created_at else None,
-                    "updated_at": transaction.updated_at.isoformat() if transaction.updated_at else None
+                    "created_at": transaction.created_at.isoformat() if transaction.created_at is not None else None,
+                    "updated_at": transaction.updated_at.isoformat() if transaction.updated_at is not None else None
                 }
 
                 # Парсим метаданные
@@ -378,8 +386,8 @@ class UserRepository(DatabaseInterface):
                     "currency": transaction.currency,
                     "description": transaction.description,
                     "external_id": transaction.external_id,
-                    "created_at": transaction.created_at.isoformat() if transaction.created_at else None,
-                    "updated_at": transaction.updated_at.isoformat() if transaction.updated_at else None
+                    "created_at": transaction.created_at.isoformat() if transaction.created_at is not None else None,
+                    "updated_at": transaction.updated_at.isoformat() if transaction.updated_at is not None else None
                 }
 
                 # Парсим метаданные

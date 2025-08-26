@@ -11,6 +11,7 @@ from datetime import datetime
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+from starlette.datastructures import Headers
 
 from repositories.user_repository import UserRepository
 from repositories.balance_repository import BalanceRepository
@@ -83,7 +84,7 @@ class WebhookHandler:
                 status_code=500
             )
 
-    async def _validate_webhook_signature(self, body: bytes, headers: Dict[str, str]) -> bool:
+    async def _validate_webhook_signature(self, body: bytes, headers: Headers) -> bool:
         """Валидация подписи вебхука от Heleket с использованием HMAC SHA256"""
         try:
             from config.settings import settings

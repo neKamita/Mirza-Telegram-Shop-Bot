@@ -5,35 +5,53 @@ import asyncio
 import aiohttp
 import redis.asyncio as redis
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 from config.settings import settings
+from redis.cluster import RedisCluster
 
 
 class HealthService:
     """Сервис для проверки здоровья системы"""
 
-    def __init__(self, redis_client: redis.Redis):
+    def __init__(self, redis_client: Union[redis.Redis, RedisCluster]):
         self.redis_client = redis_client
         self.logger = logging.getLogger(__name__)
         self.checks = {}
+        self.is_cluster = isinstance(redis_client, RedisCluster)
 
     async def check_redis_health(self) -> Dict[str, Any]:
         """Проверка состояния Redis"""
         try:
             start_time = datetime.utcnow()
-            await self.redis_client.ping()
+
+            # Для RedisCluster ping() возвращает bool, для обычного Redis - корутину
+            if self.is_cluster:
+                ping_result = self.redis_client.ping()
+            else:
+                ping_result = await self.redis_client.ping()
+
             response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
 
-            info = await self.redis_client.info()
+            # Получаем информацию о Redis
+            if self.is_cluster:
+                info = self.redis_client.info()
+            else:
+                info = await self.redis_client.info()
+
+            # Извлекаем нужные метрики
+            redis_version = info.get("redis_version", "unknown") if isinstance(info, dict) else "unknown"
+            connected_clients = info.get("connected_clients", 0) if isinstance(info, dict) else 0
+            used_memory = info.get("used_memory_human", "unknown") if isinstance(info, dict) else "unknown"
+            uptime_seconds = info.get("uptime_in_seconds", 0) if isinstance(info, dict) else 0
 
             return {
                 "status": "healthy",
                 "response_time_ms": response_time,
-                "version": info.get("redis_version", "unknown"),
-                "connected_clients": info.get("connected_clients", 0),
-                "used_memory": info.get("used_memory_human", "unknown"),
-                "uptime_seconds": info.get("uptime_in_seconds", 0)
+                "version": redis_version,
+                "connected_clients": connected_clients,
+                "used_memory": used_memory,
+                "uptime_seconds": uptime_seconds
             }
         except Exception as e:
             return {
@@ -190,16 +208,25 @@ class HealthService:
         redis_metrics = {}
         if health_status["services"]["redis"]["status"] == "healthy":
             try:
-                info = await self.redis_client.info()
-                redis_metrics = {
-                    "keyspace_hits": info.get("keyspace_hits", 0),
-                    "keyspace_misses": info.get("keyspace_misses", 0),
-                    "hit_ratio": info.get("keyspace_hits", 0) / max(info.get("keyspace_hits", 0) + info.get("keyspace_misses", 0), 1),
-                    "connected_slaves": info.get("connected_slaves", 0),
-                    "master_repl_offset": info.get("master_repl_offset", 0),
-                    "used_memory_rss": info.get("used_memory_rss", 0),
-                    "mem_fragmentation_ratio": info.get("mem_fragmentation_ratio", 0)
-                }
+                if self.is_cluster:
+                    info = self.redis_client.info()
+                else:
+                    info = await self.redis_client.info()
+
+                if isinstance(info, dict):
+                    keyspace_hits = info.get("keyspace_hits", 0)
+                    keyspace_misses = info.get("keyspace_misses", 0)
+                    redis_metrics = {
+                        "keyspace_hits": keyspace_hits,
+                        "keyspace_misses": keyspace_misses,
+                        "hit_ratio": keyspace_hits / max(keyspace_hits + keyspace_misses, 1),
+                        "connected_slaves": info.get("connected_slaves", 0),
+                        "master_repl_offset": info.get("master_repl_offset", 0),
+                        "used_memory_rss": info.get("used_memory_rss", 0),
+                        "mem_fragmentation_ratio": info.get("mem_fragmentation_ratio", 0)
+                    }
+                else:
+                    redis_metrics = {"error": "Unable to retrieve Redis info"}
             except Exception as e:
                 redis_metrics = {"error": str(e)}
 
@@ -214,21 +241,33 @@ class HealthService:
         """Кеширование статуса здоровья"""
         try:
             health_status = await self.get_health_status()
-            await self.redis_client.setex(
-                "health:status",
-                ttl,
-                str(health_status)
-            )
+            if self.is_cluster:
+                self.redis_client.setex(
+                    "health:status",
+                    ttl,
+                    str(health_status)
+                )
+            else:
+                await self.redis_client.setex(
+                    "health:status",
+                    ttl,
+                    str(health_status)
+                )
         except Exception as e:
             self.logger.error(f"Error caching health status: {e}")
 
     async def get_cached_health_status(self) -> Optional[Dict[str, Any]]:
         """Получение кешированного статуса здоровья"""
         try:
-            cached = await self.redis_client.get("health:status")
+            if self.is_cluster:
+                cached = self.redis_client.get("health:status")
+            else:
+                cached = await self.redis_client.get("health:status")
+
             if cached:
                 import ast
-                return ast.literal_eval(cached.decode())
+                cached_data = cached.decode() if isinstance(cached, bytes) else cached
+                return ast.literal_eval(cached_data)  # type: ignore
             return None
         except Exception:
             return None

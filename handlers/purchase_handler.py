@@ -4,7 +4,7 @@
 import logging
 from typing import Dict, Any, Optional, Union
 
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InaccessibleMessage, InlineKeyboardMarkup
 from aiogram import Bot
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
@@ -101,32 +101,39 @@ class PurchaseHandler(BaseHandler):
         )
         
         try:
-            await callback.message.edit_text(
-                message_text,
-                reply_markup=builder.as_markup(),
-                parse_mode="HTML"
-            )
+            if callback.message and not isinstance(callback.message, InaccessibleMessage):
+                await callback.message.edit_text(
+                    message_text,
+                    reply_markup=builder.as_markup(),
+                    parse_mode="HTML"
+                )
+            else:
+                # Если сообщение недоступно, отправляем новое сообщение
+                await callback.answer(
+                    "❌ Не удалось обновить сообщение. Попробуйте еще раз.",
+                    show_alert=True
+                )
         except Exception as e:
             self.logger.error(f"Error editing message in _show_buy_stars_menu: {e}")
-            await callback.message.answer(
-                message_text,
-                reply_markup=builder.as_markup(),
-                parse_mode="HTML"
+            # Fallback: отправляем alert пользователю
+            await callback.answer(
+                "❌ Не удалось обновить сообщение. Попробуйте еще раз.",
+                show_alert=True
             )
 
     async def buy_stars_preset(self, message_or_callback: Union[Message, CallbackQuery], bot: Bot, amount: int) -> None:
         """
         Покупка预设 пакетов звезд с использованием safe_execute
-        
+
         Args:
             message_or_callback: Сообщение или callback запрос
             bot: Экземпляр бота
             amount: Количество звезд для покупки
         """
-        if isinstance(message_or_callback, CallbackQuery):
-            user_id = message_or_callback.from_user.id
-        else:
-            user_id = message_or_callback.from_user.id
+        if not message_or_callback.from_user:
+            return
+
+        user_id = message_or_callback.from_user.id
             
         await self.safe_execute(
             user_id=user_id,
@@ -208,7 +215,7 @@ class PurchaseHandler(BaseHandler):
 
             if message:
                 try:
-                    if is_callback:
+                    if is_callback and isinstance(message, Message):
                         await message.edit_text(
                             success_message,
                             reply_markup=builder.as_markup(),
@@ -244,16 +251,16 @@ class PurchaseHandler(BaseHandler):
     async def buy_stars_custom(self, message_or_callback: Union[Message, CallbackQuery], bot: Bot, amount: int) -> None:
         """
         Покупка кастомного количества звезд с использованием safe_execute
-        
+
         Args:
             message_or_callback: Сообщение или callback запрос
             bot: Экземпляр бота
             amount: Количество звезд для покупки
         """
-        if isinstance(message_or_callback, CallbackQuery):
-            user_id = message_or_callback.from_user.id
-        else:
-            user_id = message_or_callback.from_user.id
+        if not message_or_callback.from_user:
+            return
+
+        user_id = message_or_callback.from_user.id
             
         await self.safe_execute(
             user_id=user_id,
@@ -304,7 +311,7 @@ class PurchaseHandler(BaseHandler):
             if not result or "uuid" not in result or "url" not in result:
                 if message:
                     try:
-                        if is_callback:
+                        if is_callback and isinstance(message, Message):
                             await message.edit_text("❌ Ошибка: некорректные данные от платежной системы")
                         else:
                             await message.answer("❌ Ошибка: некорректные данные от платежной системы")
@@ -332,7 +339,7 @@ class PurchaseHandler(BaseHandler):
             
             if message:
                 try:
-                    if is_callback:
+                    if is_callback and isinstance(message, Message):
                         await message.edit_text(
                             f"✅ <b>Создан счет на покупку {amount} звезд</b> ✅\n\n"
                             f"💳 <b>Ссылка на оплату:</b> {result['url']}\n\n"
@@ -385,16 +392,16 @@ class PurchaseHandler(BaseHandler):
     async def buy_stars_with_balance(self, message_or_callback: Union[Message, CallbackQuery], bot: Bot, amount: int) -> None:
         """
         Покупка звезд с баланса пользователя с использованием safe_execute
-        
+
         Args:
             message_or_callback: Сообщение или callback запрос
             bot: Экземпляр бота
             amount: Количество звезд для покупки
         """
-        if isinstance(message_or_callback, CallbackQuery):
-            user_id = message_or_callback.from_user.id
-        else:
-            user_id = message_or_callback.from_user.id
+        if not message_or_callback.from_user:
+            return
+
+        user_id = message_or_callback.from_user.id
             
         await self.safe_execute(
             user_id=user_id,
@@ -408,16 +415,16 @@ class PurchaseHandler(BaseHandler):
     async def buy_stars_with_fragment(self, message_or_callback: Union[Message, CallbackQuery], bot: Bot, amount: int) -> None:
         """
         Покупка звезд через Fragment API с использованием safe_execute
-        
+
         Args:
             message_or_callback: Сообщение или callback запрос
             bot: Экземпляр бота
             amount: Количество звезд для покупки
         """
-        if isinstance(message_or_callback, CallbackQuery):
-            user_id = message_or_callback.from_user.id
-        else:
-            user_id = message_or_callback.from_user.id
+        if not message_or_callback.from_user:
+            return
+
+        user_id = message_or_callback.from_user.id
             
         await self.safe_execute(
             user_id=user_id,
@@ -504,7 +511,7 @@ class PurchaseHandler(BaseHandler):
 
             if message:
                 try:
-                    if is_callback:
+                    if is_callback and isinstance(message, Message):
                         await message.edit_text(
                             success_message,
                             reply_markup=builder.as_markup(),
@@ -599,7 +606,7 @@ class PurchaseHandler(BaseHandler):
 
             if message:
                 try:
-                    if is_callback:
+                    if is_callback and isinstance(message, Message):
                         await message.edit_text(
                             success_message,
                             reply_markup=builder.as_markup(),
@@ -688,30 +695,42 @@ class PurchaseHandler(BaseHandler):
         elif callback.data in ["buy_100_fragment", "buy_250_fragment", "buy_500_fragment", "buy_1000_fragment"]:
             amount = int(callback.data.replace("buy_", "").replace("_fragment", ""))
             await self.buy_stars_with_fragment(callback, bot, amount)
-        elif callback.data.startswith("check_payment_"):
+        elif callback.data and callback.data.startswith("check_payment_"):
             payment_id = callback.data.replace("check_payment_", "")
             # Здесь может быть вызов метода проверки статуса платежа
             await callback.answer(f"🔍 Проверка статуса платежа {payment_id}")
         elif callback.data == "back_to_buy_stars":
             # Возврат к главному меню покупок
             from handlers.message_handler import MessageHandler
-            await callback.message.edit_text(
-                "⭐ <b>Покупка звезд</b> ⭐\n\n"
-                "🎯 <i>Выберите способ оплаты:</i>\n\n"
-                f"💳 <i>Картой/Кошельком - оплата через Heleket</i>\n"
-                f"💰 <i>С баланса - списание со счета</i>\n"
-                f"💎 <i>Через Fragment - прямая покупка</i>\n\n"
-                f"✨ <i>Каждая звезда имеет ценность!</i>",
-                reply_markup=InlineKeyboardBuilder().row(
-                    InlineKeyboardButton(text="💳 Картой/Кошельком", callback_data="buy_stars"),
-                    InlineKeyboardButton(text="💰 С баланса", callback_data="buy_stars_balance")
-                ).row(
-                    InlineKeyboardButton(text="💎 Через Fragment", callback_data="buy_stars_fragment")
-                ).row(
-                    InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
-                ).as_markup(),
-                parse_mode="HTML"
-            )
+            if callback.message and isinstance(callback.message, Message):
+                await callback.message.edit_text(
+                    "⭐ <b>Покупка звезд</b> ⭐\n\n"
+                    "🎯 <i>Выберите способ оплаты:</i>\n\n"
+                    f"💳 <i>Картой/Кошельком - оплата через Heleket</i>\n"
+                    f"💰 <i>С баланса - списание со счета</i>\n"
+                    f"💎 <i>Через Fragment - прямая покупка</i>\n\n"
+                    f"✨ <i>Каждая звезда имеет ценность!</i>",
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [
+                                InlineKeyboardButton(text="💳 Картой/Кошельком", callback_data="buy_stars"),
+                                InlineKeyboardButton(text="💰 С баланса", callback_data="buy_stars_balance")
+                            ],
+                            [
+                                InlineKeyboardButton(text="💎 Через Fragment", callback_data="buy_stars_fragment")
+                            ],
+                            [
+                                InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
+                            ]
+                        ]
+                    ),
+                    parse_mode="HTML"
+                )
+            else:
+                await callback.answer(
+                    "❌ Не удалось обновить меню. Попробуйте еще раз.",
+                    show_alert=True
+                )
         else:
             await callback.answer("❓ <b>Неизвестное действие</b> ❓\n\n"
                                "🔍 <i>Пожалуйста, используйте доступные кнопки</i>\n\n"
@@ -721,12 +740,15 @@ class PurchaseHandler(BaseHandler):
     async def _show_rate_limit_message(self, message_or_callback: Union[Message, CallbackQuery], limit_type: str) -> None:
         """
         Показ сообщения о превышении rate limit пользователю
-        
+
         Args:
             message_or_callback: Сообщение или callback запрос
             limit_type: Тип лимита
         """
         try:
+            if not message_or_callback.from_user:
+                return
+
             user_id = message_or_callback.from_user.id
             remaining_time = await self.get_rate_limit_remaining_time(user_id, limit_type)
             
@@ -802,7 +824,7 @@ class PurchaseHandler(BaseHandler):
         
         # Отправляем сообщение
         try:
-            if isinstance(message_or_callback, CallbackQuery) and message_or_callback.message:
+            if isinstance(message_or_callback, CallbackQuery) and message_or_callback.message and not isinstance(message_or_callback.message, InaccessibleMessage):
                 await message_or_callback.message.edit_text(
                     insufficient_balance_message,
                     reply_markup=builder.as_markup(),
@@ -810,7 +832,7 @@ class PurchaseHandler(BaseHandler):
                 )
             else:
                 message = message_or_callback.message if isinstance(message_or_callback, CallbackQuery) else message_or_callback
-                if message:
+                if message and not isinstance(message, InaccessibleMessage):
                     await message.answer(
                         insufficient_balance_message,
                         reply_markup=builder.as_markup(),

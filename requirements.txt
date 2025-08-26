@@ -12,9 +12,6 @@ uvicorn>=0.30.6
 fastapi>=0.115.4
 starlette>=0.40.0
 
-
-chromedriver-py>=119.0.0
-
 # Configuration
 python-dotenv>=1.0.1
 
