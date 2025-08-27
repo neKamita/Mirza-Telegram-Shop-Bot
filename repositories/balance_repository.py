@@ -5,7 +5,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Dict, Any, Optional, List
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import select, insert, update, delete, func
 from sqlalchemy.exc import IntegrityError
@@ -16,7 +16,7 @@ from repositories.user_repository import Balance, Transaction, TransactionType, 
 class BalanceRepository:
     """Репозиторий для управления балансом и транзакциями"""
 
-    def __init__(self, async_session: sessionmaker):
+    def __init__(self, async_session: async_sessionmaker[AsyncSession]):
         self.async_session = async_session
         self.logger = logging.getLogger(__name__)
 
@@ -84,10 +84,15 @@ class BalanceRepository:
                     await self.create_user_balance(user_id, amount if operation == "set" else 0, currency)
                     balance = await session.get(Balance, user_id)
 
+                # Проверяем, что баланс существует после создания
+                if not balance:
+                    self.logger.error(f"Balance not found for user {user_id} after creation attempt")
+                    return False
+
                 # Выполняем операцию (преобразуем float в Decimal для совместимости)
                 from decimal import Decimal
                 amount_decimal = Decimal(str(amount))
-                
+
                 if operation == "add":
                     balance.amount += amount_decimal
                 elif operation == "subtract":

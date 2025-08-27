@@ -1148,6 +1148,13 @@ class StarPurchaseService(StarPurchaseServiceInterface):
 
             # Обновляем статус транзакции
             if status == "paid":
+                # Получаем сумму пополнения из метаданных транзакции
+                recharge_amount = transaction_data.get("metadata", {}).get("recharge_amount", 0)
+
+                # Пополняем баланс пользователя
+                if recharge_amount:
+                    await self.balance_repository.update_user_balance(user_id, float(recharge_amount), "add")
+
                 await self.balance_repository.update_transaction_status(
                     transaction_id,
                     TransactionStatus.COMPLETED,
@@ -1155,7 +1162,8 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                         "webhook_received_at": datetime.utcnow().isoformat(),
                         "payment_amount": amount,
                         "payment_status": status,
-                        "recharge_amount": transaction_data.get("metadata", {}).get("recharge_amount", 0)
+                        "recharge_amount": recharge_amount,
+                        "balance_updated": True
                     }
                 )
 
