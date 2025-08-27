@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-echo "=== Redis Cluster Creator (Optimized) - $(date) ==="
+echo "=== Redis Cluster Creator - $(date) ==="
 
 # Функция для проверки доступности узла с таймаутом
 check_node() {
