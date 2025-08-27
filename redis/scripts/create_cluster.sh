@@ -157,4 +157,4 @@ done
 echo ""
 echo "=== Cluster Status ==="
 redis-cli --cluster check redis-node-1:7379 -a "${REDIS_PASSWORD}"
-echo "=== Redis Cluster Creator (Optimized) completed successfully ==="
+echo "=== Redis Cluster Creator completed successfully ==="
