@@ -17,7 +17,7 @@ class TestStarPurchaseServiceFragmentIntegration:
         """Фикстура для создания mock объектов"""
         # Mock UserRepository
         user_repository = Mock()
-        user_repository.get_user_by_id = AsyncMock(return_value={
+        user_repository.get_user = AsyncMock(return_value={
             "user_id": 123456789,
             "telegram_username": "@testuser"
         })
@@ -35,15 +35,15 @@ class TestStarPurchaseServiceFragmentIntegration:
         })
         balance_repository.get_user_transactions = AsyncMock(return_value=[])
         
-        # Mock PaymentService
-        payment_service = Mock()
+        # Mock PaymentService - используем AsyncMock для асинхронных методов
+        payment_service = AsyncMock()
         
-        # Mock Cache services
-        payment_cache = Mock()
+        # Mock Cache services - используем AsyncMock для асинхронных методов
+        payment_cache = AsyncMock()
         payment_cache.cache_payment_details = AsyncMock()
         payment_cache.get_payment_details = AsyncMock(return_value=None)
         
-        user_cache = Mock()
+        user_cache = AsyncMock()
         user_cache.cache_user_balance = AsyncMock()
         user_cache.get_user_balance = AsyncMock(return_value=None)
         user_cache.invalidate_user_cache = AsyncMock()
@@ -89,7 +89,7 @@ class TestStarPurchaseServiceFragmentIntegration:
             assert result["transaction_id"] == 12345
             
             # Проверяем, что были вызваны необходимые методы
-            star_purchase_service.user_repository.get_user_by_id.assert_called_once_with(123456789)
+            star_purchase_service.user_repository.get_user.assert_called_once_with(123456789)
             star_purchase_service.balance_repository.create_transaction.assert_called_once()
             star_purchase_service.balance_repository.update_transaction_status.assert_called_once()
             # Проверяем, что update_transaction_status был вызван с правильными аргументами (без проверки точного времени)
@@ -124,7 +124,7 @@ class TestStarPurchaseServiceFragmentIntegration:
             assert result["transaction_id"] == 12345
             
             # Проверяем, что были вызваны необходимые методы
-            star_purchase_service.user_repository.get_user_by_id.assert_called_once_with(123456789)
+            star_purchase_service.user_repository.get_user.assert_called_once_with(123456789)
             star_purchase_service.balance_repository.create_transaction.assert_called_once()
             star_purchase_service.balance_repository.update_transaction_status.assert_called_once()
             # Проверяем, что update_transaction_status был вызван с правильными аргументами (без проверки точного времени)
@@ -153,7 +153,7 @@ class TestStarPurchaseServiceFragmentIntegration:
             assert "Network error" in result["error"]
             
             # Проверяем, что были вызваны необходимые методы
-            star_purchase_service.user_repository.get_user_by_id.assert_called_once_with(123456789)
+            star_purchase_service.user_repository.get_user.assert_called_once_with(123456789)
             star_purchase_service.balance_repository.create_transaction.assert_called_once()
             # При исключении update_transaction_status не вызывается, проверяем это
             star_purchase_service.balance_repository.update_transaction_status.assert_not_called()
