@@ -1123,6 +1123,9 @@ class StarPurchaseService(StarPurchaseServiceInterface):
     async def process_recharge_webhook(self, webhook_data: Dict[str, Any]) -> bool:
         """Обработка вебхука от платежной системы Heleket для пополнения баланса"""
         try:
+            # Добавляем отладочную информацию
+            print(f"DEBUG: process_recharge_webhook called with: {webhook_data}")
+            
             # Валидация подписи вебхука
             if not await self._validate_webhook_signature(webhook_data):
                 self.logger.error("Invalid webhook signature")
@@ -1133,27 +1136,62 @@ class StarPurchaseService(StarPurchaseServiceInterface):
             status = webhook_data.get("status")
             amount = webhook_data.get("amount")
 
+            print(f"DEBUG: Extracted from webhook - uuid: {payment_uuid}, status: {status}, amount: {amount}")
+
             if not payment_uuid or not status:
                 self.logger.error("Invalid webhook data")
                 return False
 
             # Получаем транзакцию по UUID платежа
+            print(f"DEBUG: Getting transaction for UUID: {payment_uuid}")
             transaction_data = await self.balance_repository.get_transaction_by_external_id(payment_uuid)
             if not transaction_data:
                 self.logger.error(f"Transaction not found for payment {payment_uuid}")
                 return False
 
+            print(f"DEBUG: Transaction data: {transaction_data}")
+
             user_id = transaction_data["user_id"]
             transaction_id = transaction_data["id"]
+            current_status = transaction_data["status"]
+            
+            print(f"DEBUG: Extracted transaction info - user_id: {user_id}, transaction_id: {transaction_id}, current_status: {current_status} (type: {type(current_status)})")
+
+            # Проверяем, не была ли транзакция уже обработана
+            print(f"DEBUG: Checking transaction status for {payment_uuid}: current_status='{current_status}' (type: {type(current_status)}), COMPLETED.value='{TransactionStatus.COMPLETED.value}' (type: {type(TransactionStatus.COMPLETED.value)}), COMPLETED enum: '{TransactionStatus.COMPLETED}'")
+            self.logger.info(f"Checking transaction status for {payment_uuid}: current_status='{current_status}' (type: {type(current_status)}), COMPLETED.value='{TransactionStatus.COMPLETED.value}' (type: {type(TransactionStatus.COMPLETED.value)}), COMPLETED enum: '{TransactionStatus.COMPLETED}'")
+            
+            # Детальное сравнение с разными вариантами статуса
+            completed_values = [
+                TransactionStatus.COMPLETED.value,
+                str(TransactionStatus.COMPLETED.value),
+                "completed"
+            ]
+            
+            is_already_completed = any(str(current_status) == str(completed_val) for completed_val in completed_values)
+            print(f"DEBUG: is_already_completed check result: {is_already_completed}")
+            self.logger.info(f"is_already_completed check result: {is_already_completed}")
+            
+            if is_already_completed:
+                print(f"DEBUG: Transaction {payment_uuid} already completed, skipping duplicate webhook")
+                self.logger.info(f"Transaction {payment_uuid} already completed, skipping duplicate webhook")
+                return True
 
             # Обновляем статус транзакции
             if status == "paid":
                 # Получаем сумму пополнения из метаданных транзакции
                 recharge_amount = transaction_data.get("metadata", {}).get("recharge_amount", 0)
 
-                # Пополняем баланс пользователя
-                if recharge_amount:
+                # Пополняем баланс пользователя только если транзакция еще не завершена
+                print(f"DEBUG: Checking if should update balance: recharge_amount={recharge_amount}, current_status={current_status}, COMPLETED.value={TransactionStatus.COMPLETED.value}")
+                self.logger.info(f"Checking if should update balance: recharge_amount={recharge_amount}, current_status={current_status}, COMPLETED.value={TransactionStatus.COMPLETED.value}")
+                if recharge_amount and current_status != TransactionStatus.COMPLETED.value:
+                    print(f"DEBUG: Updating balance for user {user_id} with amount {recharge_amount}")
+                    self.logger.info(f"Updating balance for user {user_id} with amount {recharge_amount}")
                     await self.balance_repository.update_user_balance(user_id, float(recharge_amount), "add")
+                else:
+                    print(f"DEBUG: Skipping balance update: recharge_amount={recharge_amount}, current_status={current_status}")
+                    self.logger.info(f"Skipping balance update: recharge_amount={recharge_amount}, current_status={current_status}")
 
                 await self.balance_repository.update_transaction_status(
                     transaction_id,

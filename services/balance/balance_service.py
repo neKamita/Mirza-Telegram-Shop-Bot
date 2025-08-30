@@ -307,17 +307,21 @@ class BalanceService(BalanceServiceInterface):
             return {}
 
     async def process_recharge(self, user_id: int, amount: float, payment_uuid: str) -> bool:
-        """Обработка пополнения баланса после успешного платежа"""
+        """Обработка пополнения баланса после успешного платежа с транзакционной безопасностью"""
         try:
             # Валидация суммы
             if not await self.validate_transaction_amount(amount):
                 self.logger.error(f"Invalid recharge amount: {amount} for user {user_id}")
                 return False
 
-            # Получаем транзакцию по UUID платежа
-            transaction_data = await self.balance_repository.get_transaction_by_external_id(payment_uuid)
-            if not transaction_data:
-                # Если транзакции нет, создаем новую
+            # Проверяем, не была ли транзакция уже обработана
+            existing_transaction = await self.balance_repository.get_transaction_by_external_id(payment_uuid)
+            if existing_transaction and existing_transaction["status"] == TransactionStatus.COMPLETED.value:
+                self.logger.warning(f"Duplicate recharge transaction detected: {payment_uuid}")
+                return True
+
+            # Создаем новую транзакцию если не найдена
+            if not existing_transaction:
                 transaction_id = await self.create_transaction(
                     user_id=user_id,
                     transaction_type="recharge",
@@ -331,43 +335,59 @@ class BalanceService(BalanceServiceInterface):
                     }
                 )
             else:
-                transaction_id = transaction_data["id"]
+                transaction_id = existing_transaction["id"]
 
             if not transaction_id:
                 self.logger.error(f"Failed to create transaction for recharge {payment_uuid}")
                 return False
 
-            # Обновляем баланс
-            success = await self.update_user_balance(user_id, amount, "add")
-            if success:
-                # Принудительно инвалидируем кэш пользователя, чтобы гарантировать свежесть данных
-                if self.user_cache:
-                    await self.user_cache.invalidate_user_cache(user_id)
-                    self.logger.info(f"Invalidated user cache for {user_id} after recharge")
+            # Транзакционное обновление баланса и статуса
+            try:
+                # Обновляем баланс
+                update_success = await self.balance_repository.update_user_balance(user_id, amount, "add")
                 
-                # Завершаем транзакцию
-                await self.complete_transaction(
-                    transaction_id,
-                    metadata={
-                        "completed_at": datetime.utcnow().isoformat(),
-                        "payment_uuid": payment_uuid,
-                        "balance_updated": True,
-                        "cache_invalidated": True
-                    }
-                )
-                self.logger.info(f"Successfully processed recharge {payment_uuid} for user {user_id}")
-                return True
-            else:
+                if update_success:
+                    # Принудительно инвалидируем кэш пользователя, чтобы гарантировать свежесть данных
+                    if self.user_cache:
+                        await self.user_cache.invalidate_user_cache(user_id)
+                        self.logger.info(f"Invalidated user cache for {user_id} after recharge")
+                    
+                    # Завершаем транзакцию
+                    await self.complete_transaction(
+                        transaction_id,
+                        metadata={
+                            "completed_at": datetime.utcnow().isoformat(),
+                            "payment_uuid": payment_uuid,
+                            "balance_updated": True,
+                            "cache_invalidated": True
+                        }
+                    )
+                    self.logger.info(f"Successfully processed recharge {payment_uuid} for user {user_id}")
+                    return True
+                else:
+                    # Отмечаем транзакцию как failed
+                    await self.fail_transaction(
+                        transaction_id,
+                        metadata={
+                            "failed_at": datetime.utcnow().isoformat(),
+                            "error": "Failed to update balance",
+                            "payment_uuid": payment_uuid
+                        }
+                    )
+                    self.logger.error(f"Failed to update balance for recharge {payment_uuid}")
+                    return False
+                    
+            except Exception as inner_e:
+                self.logger.error(f"Error during transaction processing for recharge {payment_uuid}: {inner_e}")
                 # Отмечаем транзакцию как failed
                 await self.fail_transaction(
                     transaction_id,
                     metadata={
                         "failed_at": datetime.utcnow().isoformat(),
-                        "error": "Failed to update balance",
+                        "error": f"Processing error: {str(inner_e)}",
                         "payment_uuid": payment_uuid
                     }
                 )
-                self.logger.error(f"Failed to update balance for recharge {payment_uuid}")
                 return False
 
         except Exception as e:
