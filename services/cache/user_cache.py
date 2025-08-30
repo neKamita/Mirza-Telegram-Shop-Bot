@@ -164,6 +164,9 @@ class UserCache:
                 local_data = self.local_cache.get(key)
                 if local_data:
                     self.logger.debug(f"User profile {user_id} found in local cache")
+                    # LocalCache возвращает данные в формате {'data': value}
+                    if isinstance(local_data, dict) and 'data' in local_data:
+                        return local_data['data']
                     return local_data
 
             # Если Redis доступен, пробуем Redis
@@ -214,6 +217,9 @@ class UserCache:
                             local_data = self.local_cache.get(key)
                             if local_data:
                                 self.logger.info(f"User profile {user_id} found in local cache (fallback)")
+                                # LocalCache возвращает данные в формате {'data': value}
+                                if isinstance(local_data, dict) and 'data' in local_data:
+                                    return local_data['data']
                                 return local_data
                             else:
                                 self.logger.debug(f"No profile found in local cache fallback for user {user_id}")
@@ -286,7 +292,11 @@ class UserCache:
                 try:
                     local_data = self.local_cache.get(key)
                     if local_data:
-                        balance = local_data.get('data', {}).get('balance')
+                        # LocalCache возвращает данные в формате {'data': value}
+                        if isinstance(local_data, dict) and 'data' in local_data:
+                            balance = local_data['data'].get('balance')
+                        else:
+                            balance = local_data.get('balance')
                         self.logger.info(f"User balance {user_id} found in local cache: {balance}")
                         return balance
                     else:
@@ -345,10 +355,15 @@ class UserCache:
                         self.logger.debug(f"Retrying local cache after Redis error for user {user_id}")
                         try:
                             local_data = self.local_cache.get(key)
-                            balance = local_data.get('data', {}).get('balance') if local_data else None
-                            if balance is not None:
-                                self.logger.info(f"User balance {user_id} found in local cache (fallback): {balance}")
-                                return balance
+                            if local_data:
+                                # LocalCache возвращает данные в формате {'data': value}
+                                if isinstance(local_data, dict) and 'data' in local_data:
+                                    balance = local_data['data'].get('balance')
+                                else:
+                                    balance = local_data.get('balance')
+                                if balance is not None:
+                                    self.logger.info(f"User balance {user_id} found in local cache (fallback): {balance}")
+                                    return balance
                             else:
                                 self.logger.debug(f"No balance found in local cache fallback for user {user_id}")
                         except Exception as fallback_error:

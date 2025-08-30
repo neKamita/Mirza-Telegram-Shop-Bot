@@ -23,8 +23,13 @@ from handlers.message_handler import MessageHandler
 
 async def init_database():
     """Инициализация базы данных"""
-    user_repository = UserRepository(database_url=settings.database_url)
-    await user_repository.create_tables()
+    try:
+        user_repository = UserRepository(database_url=settings.database_url)
+        await user_repository.create_tables()
+        logging.info("Database initialized successfully")
+    except Exception as e:
+        logging.error(f"Failed to initialize database: {e}")
+        # Graceful degradation - продолжаем работу без базы
 
 
 async def init_cache_services():

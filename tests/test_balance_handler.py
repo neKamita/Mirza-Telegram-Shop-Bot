@@ -1,164 +1,307 @@
 """
-Упрощенные unit-тесты для BalanceHandler - тестируем только логику без вызовов aiogram
+Тесты для BalanceHandler
 """
 import pytest
 import asyncio
-from datetime import datetime
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch, MagicMock
 from aiogram.types import Message, CallbackQuery, User, Chat
 from aiogram import Bot
 
 from handlers.balance_handler import BalanceHandler
 from services.balance.balance_service import BalanceService
-from repositories.user_repository import UserRepository
-from services.payment.payment_service import PaymentService
-from services.payment.star_purchase_service import StarPurchaseService
 from handlers.error_handler import ErrorHandler
 
 
-class TestBalanceHandlerSimple:
-    """Упрощенные тесты для BalanceHandler (только логика)"""
-    
+class TestBalanceHandler:
+    """Тесты для BalanceHandler"""
+
     @pytest.fixture
-    def mock_services(self):
-        """Фикстура с mock сервисами"""
-        user_repo = Mock(spec=UserRepository)
-        payment_service = Mock(spec=PaymentService)
+    def balance_handler(self):
+        """Фикстура для создания экземпляра BalanceHandler"""
+        # Создаем моки для всех зависимостей BaseHandler
+        user_repository = Mock()
+        payment_service = Mock()
         balance_service = Mock(spec=BalanceService)
-        star_purchase_service = Mock(spec=StarPurchaseService)
+        star_purchase_service = Mock()
+        session_cache = Mock()
+        rate_limit_cache = Mock()
+        payment_cache = Mock()
         
-        # Настраиваем моки
-        user_repo.user_exists = AsyncMock(return_value=True)
-        balance_service.get_user_balance = AsyncMock(return_value={
-            "balance": 100.0,
-            "currency": "TON",
-            "source": "database"
-        })
-        balance_service.get_user_balance_history = AsyncMock(return_value={
-            "transactions_count": 5,
-            "initial_balance": 50.0,
-            "final_balance": 100.0,
-            "transactions": [
-                {
-                    "transaction_type": "purchase",
-                    "amount": -20.0,
-                    "status": "completed",
-                    "created_at": "2024-01-01T12:00:00Z"
-                }
-            ]
-        })
+        # Создаем обработчик с моками
+        handler = BalanceHandler(
+            user_repository=user_repository,
+            payment_service=payment_service,
+            balance_service=balance_service,
+            star_purchase_service=star_purchase_service,
+            session_cache=session_cache,
+            rate_limit_cache=rate_limit_cache,
+            payment_cache=payment_cache
+        )
         
-        return {
-            'user_repository': user_repo,
-            'payment_service': payment_service,
-            'balance_service': balance_service,
-            'star_purchase_service': star_purchase_service
-        }
-    
+        # Дополнительные моки
+        handler.error_handler = Mock(spec=ErrorHandler)
+        handler.logger = Mock()
+        handler.check_rate_limit = AsyncMock(return_value=True)
+        handler.get_rate_limit_remaining_time = AsyncMock(return_value=30)
+        
+        return handler
+
     @pytest.fixture
-    def balance_handler(self, mock_services):
-        """Фикстура для создания BalanceHandler"""
-        return BalanceHandler(
-            user_repository=mock_services['user_repository'],
-            payment_service=mock_services['payment_service'],
-            balance_service=mock_services['balance_service'],
-            star_purchase_service=mock_services['star_purchase_service']
-        )
-    
+    def mock_message(self):
+        """Фикстура для создания мока сообщения"""
+        message = Mock(spec=Message)
+        message.from_user = Mock(spec=User)
+        message.from_user.id = 123
+        message.text = "/balance"
+        message.answer = AsyncMock()
+        message.edit_text = AsyncMock()
+        return message
+
+    @pytest.fixture
+    def mock_callback(self):
+        """Фикстура для создания мока callback"""
+        callback = Mock(spec=CallbackQuery)
+        callback.from_user = Mock(spec=User)
+        callback.from_user.id = 123
+        callback.data = "balance"
+        callback.answer = AsyncMock()
+        callback.message = Mock(spec=Message)
+        callback.message.edit_text = AsyncMock()
+        return callback
+
+    @pytest.fixture
+    def mock_bot(self):
+        """Фикстура для создания мока бота"""
+        return Mock(spec=Bot)
+
     @pytest.mark.asyncio
-    async def test_get_user_balance_success(self, balance_handler):
-        """Тест успешного получения баланса пользователя"""
-        # Вызываем внутренний метод
-        result = await balance_handler.balance_service.get_user_balance(123)
-        
-        # Проверяем результат
-        assert result["balance"] == 100.0
-        assert result["currency"] == "TON"
-        assert result["source"] == "database"
-        
-        # Проверяем, что сервис был вызван
-        balance_handler.balance_service.get_user_balance.assert_called_once_with(123)
-    
-    @pytest.mark.asyncio
-    async def test_get_user_balance_error(self, balance_handler):
-        """Тест получения баланса с ошибкой"""
-        # Настраиваем сервис на возврат ошибки
-        balance_handler.balance_service.get_user_balance = AsyncMock(
-            side_effect=Exception("Database error")
-        )
-        
-        # Вызываем метод и проверяем исключение
-        with pytest.raises(Exception, match="Database error"):
-            await balance_handler.balance_service.get_user_balance(123)
-    
-    @pytest.mark.asyncio
-    async def test_get_user_balance_history_success(self, balance_handler):
-        """Тест успешного получения истории баланса"""
-        # Вызываем внутренний метод
-        result = await balance_handler.balance_service.get_user_balance_history(123, 30)
-        
-        # Проверяем результат
-        assert result["transactions_count"] == 5
-        assert result["initial_balance"] == 50.0
-        assert result["final_balance"] == 100.0
-        assert len(result["transactions"]) == 1
-        
-        # Проверяем, что сервис был вызван
-        balance_handler.balance_service.get_user_balance_history.assert_called_once_with(123, 30)
-    
-    @pytest.mark.asyncio
-    async def test_user_exists_check(self, balance_handler):
-        """Тест проверки существования пользователя"""
-        # Вызываем метод
-        result = await balance_handler.user_repository.user_exists(123)
-        
-        # Проверяем результат
-        assert result is True
-        
-        # Проверяем, что репозиторий был вызван
-        balance_handler.user_repository.user_exists.assert_called_once_with(123)
-    
-    @pytest.mark.asyncio
-    async def test_balance_formatting_logic(self):
-        """Тест логики форматирования баланса (без вызовов aiogram)"""
-        # Создаем mock данные баланса
+    async def test_show_balance_success(self, balance_handler, mock_message, mock_bot):
+        """Тест успешного отображения баланса"""
+        # Настраиваем моки
         balance_data = {
-            "balance": 150.75,
+            "balance": 100.0,
+            "currency": "TON", 
+            "source": "cache"
+        }
+        balance_handler.balance_service.get_user_balance = AsyncMock(return_value=balance_data)
+        
+        # Вызываем метод
+        await balance_handler.show_balance(mock_message, mock_bot)
+        
+        # Проверяем вызовы
+        balance_handler.balance_service.get_user_balance.assert_called_once_with(123)
+        mock_message.answer.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_show_balance_no_user_info(self, balance_handler, mock_message, mock_bot):
+        """Тест отображения баланса без информации о пользователе"""
+        # Убираем информацию о пользователе
+        mock_message.from_user = None
+        
+        # Вызываем метод
+        await balance_handler.show_balance(mock_message, mock_bot)
+        
+        # Проверяем логирование
+        balance_handler.logger.warning.assert_called_once_with("User information is missing in show_balance")
+        mock_message.answer.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_show_balance_service_error(self, balance_handler, mock_message, mock_bot):
+        """Тест отображения баланса с ошибкой сервиса"""
+        # Настраиваем моки для ошибки
+        balance_handler.balance_service.get_user_balance = AsyncMock(return_value=None)
+        
+        # Вызываем метод
+        await balance_handler.show_balance(mock_message, mock_bot)
+        
+        # Проверяем вызовы
+        balance_handler.balance_service.get_user_balance.assert_called_once_with(123)
+        mock_message.answer.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_show_balance_callback_success(self, balance_handler, mock_callback, mock_bot):
+        """Тест успешного отображения баланса через callback"""
+        # Настраиваем моки
+        balance_data = {
+            "balance": 150.0,
             "currency": "TON",
             "source": "database"
         }
+        balance_handler.balance_service.get_user_balance = AsyncMock(return_value=balance_data)
         
-        # Проверяем логику форматирования
-        formatted_balance = f"Баланс: {balance_data['balance']} {balance_data['currency']}"
+        # Вызываем метод
+        await balance_handler.show_balance(mock_callback, mock_bot)
         
-        assert formatted_balance == "Баланс: 150.75 TON"
-        assert isinstance(balance_data["balance"], float)
-        assert balance_data["currency"] == "TON"
-    
+        # Проверяем вызовы
+        balance_handler.balance_service.get_user_balance.assert_called_once_with(123)
+        mock_callback.message.edit_text.assert_called_once()
+
     @pytest.mark.asyncio
-    async def test_history_formatting_logic(self):
-        """Тест логики форматирования истории (без вызовов aiogram)"""
-        # Создаем mock данные истории
+    async def test_show_balance_history_success(self, balance_handler, mock_callback, mock_bot):
+        """Тест успешного отображения истории баланса"""
+        # Настраиваем моки
         history_data = {
-            "transactions_count": 3,
-            "initial_balance": 100.0,
+            "initial_balance": 50.0,
             "final_balance": 150.0,
+            "transactions_count": 3,
             "transactions": [
                 {
-                    "transaction_type": "deposit",
-                    "amount": 50.0,
+                    "transaction_type": "recharge",
+                    "amount": 100.0,
                     "status": "completed",
-                    "created_at": "2024-01-01T12:00:00Z"
+                    "created_at": "2024-01-01T10:00:00Z"
                 }
             ]
         }
+        balance_handler.balance_service.get_user_balance_history = AsyncMock(return_value=history_data)
+        balance_handler.check_rate_limit = AsyncMock(return_value=True)
         
-        # Проверяем базовую логику
-        assert history_data["transactions_count"] == 3
-        assert history_data["final_balance"] > history_data["initial_balance"]
-        assert len(history_data["transactions"]) == 1
-        assert history_data["transactions"][0]["amount"] == 50.0
+        # Вызываем метод
+        await balance_handler.show_balance_history(mock_callback, mock_bot)
+        
+        # Проверяем вызовы
+        balance_handler.balance_service.get_user_balance_history.assert_called_once_with(123, days=30)
+        mock_callback.message.edit_text.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_show_balance_history_no_transactions(self, balance_handler, mock_callback, mock_bot):
+        """Тест отображения истории баланса без транзакций"""
+        # Настраиваем моки
+        history_data = {
+            "transactions_count": 0
+        }
+        balance_handler.balance_service.get_user_balance_history = AsyncMock(return_value=history_data)
+        balance_handler.check_rate_limit = AsyncMock(return_value=True)
+        
+        # Вызываем метод
+        await balance_handler.show_balance_history(mock_callback, mock_bot)
+        
+        # Проверяем вызовы
+        balance_handler.balance_service.get_user_balance_history.assert_called_once_with(123, days=30)
+        mock_callback.message.edit_text.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_show_balance_history_rate_limit(self, balance_handler, mock_callback, mock_bot):
+        """Тест ограничения rate limit для истории баланса"""
+        # Настраиваем моки
+        balance_handler.check_rate_limit = AsyncMock(return_value=False)
+        balance_handler._show_rate_limit_message = AsyncMock()
+        
+        # Вызываем метод
+        await balance_handler.show_balance_history(mock_callback, mock_bot)
+        
+        # Проверяем вызовы
+        balance_handler.check_rate_limit.assert_called_once_with(123, "operation", 20, 60)
+        balance_handler._show_rate_limit_message.assert_called_once_with(mock_callback, "operation")
+        balance_handler.balance_service.get_user_balance_history.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_message_balance_command(self, balance_handler, mock_message, mock_bot):
+        """Тест обработки сообщения с командой баланса"""
+        # Настраиваем моки
+        mock_message.text = "мой баланс"
+        balance_handler.show_balance = AsyncMock()
+        
+        # Вызываем метод
+        await balance_handler.handle_message(mock_message, mock_bot)
+        
+        # Проверяем вызовы
+        balance_handler.show_balance.assert_called_once_with(mock_message, mock_bot)
+
+    @pytest.mark.asyncio
+    async def test_handle_message_unknown_command(self, balance_handler, mock_message, mock_bot):
+        """Тест обработки неизвестной команды"""
+        # Настраиваем моки
+        mock_message.text = "неизвестная команда"
+        
+        # Вызываем метод
+        await balance_handler.handle_message(mock_message, mock_bot)
+        
+        # Проверяем вызовы
+        mock_message.answer.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_callback_balance(self, balance_handler, mock_callback, mock_bot):
+        """Тест обработки callback для баланса"""
+        # Настраиваем моки
+        mock_callback.data = "balance"
+        balance_handler.show_balance = AsyncMock()
+        
+        # Вызываем метод
+        await balance_handler.handle_callback(mock_callback, mock_bot)
+        
+        # Проверяем вызовы
+        balance_handler.show_balance.assert_called_once_with(mock_callback, mock_bot)
+
+    @pytest.mark.asyncio
+    async def test_handle_callback_balance_history(self, balance_handler, mock_callback, mock_bot):
+        """Тест обработки callback для истории баланса"""
+        # Настраиваем моки
+        mock_callback.data = "balance_history"
+        balance_handler.show_balance_history = AsyncMock()
+        
+        # Вызываем метод
+        await balance_handler.handle_callback(mock_callback, mock_bot)
+        
+        # Проверяем вызовы
+        balance_handler.show_balance_history.assert_called_once_with(mock_callback, mock_bot)
+
+    @pytest.mark.asyncio
+    async def test_handle_callback_unknown(self, balance_handler, mock_callback, mock_bot):
+        """Тест обработки неизвестного callback"""
+        # Настраиваем моки
+        mock_callback.data = "unknown_action"
+        
+        # Вызываем метод
+        await balance_handler.handle_callback(mock_callback, mock_bot)
+        
+        # Проверяем вызовы
+        mock_callback.answer.assert_called_once_with(
+            "❓ <b>Неизвестное действие</b> ❓\n\n"
+            "🔍 <i>Пожалуйста, используйте доступные кнопки</i>\n\n"
+            "💡 <i>Введите /start для возврата в меню</i>",
+            show_alert=True
+        )
+
+    @pytest.mark.asyncio
+    async def test_show_rate_limit_message_message(self, balance_handler, mock_message):
+        """Тест показа сообщения о rate limit для сообщения"""
+        # Вызываем метод
+        await balance_handler._show_rate_limit_message(mock_message, "operation")
+        
+        # Проверяем вызовы
+        mock_message.answer.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_show_rate_limit_message_callback(self, balance_handler, mock_callback):
+        """Тест показа сообщения о rate limit для callback"""
+        # Вызываем метод
+        await balance_handler._show_rate_limit_message(mock_callback, "operation")
+        
+        # Проверяем вызовы
+        mock_callback.answer.assert_called_once_with(
+            "🔄 ⏳ Подождите немного\n\n"
+            "📝 Слишком много операций за короткое время\n\n"
+            "⏰ Попробуйте через 30 сек.\n\n"
+            "💡 Это защищает сервис от перегрузки",
+            show_alert=True
+        )
+
+    @pytest.mark.asyncio
+    async def test_show_rate_limit_message_no_user(self, balance_handler, mock_message):
+        """Тест показа сообщения о rate limit без информации о пользователе"""
+        # Убираем информацию о пользователе
+        mock_message.from_user = None
+        
+        # Вызываем метод
+        await balance_handler._show_rate_limit_message(mock_message, "operation")
+        
+        # Проверяем логирование
+        balance_handler.logger.warning.assert_called_once_with(
+            "User information is missing in _show_rate_limit_message"
+        )
+        mock_message.answer.assert_not_called()
 
 
 if __name__ == "__main__":
-    pytest.main([__file__])
+    pytest.main([__file__, "-v"])
