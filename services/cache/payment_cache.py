@@ -108,9 +108,11 @@ class PaymentCache:
                 except Exception as redis_error:
                     self.logger.warning(f"Failed to cache invoice in Redis, using local cache: {redis_error}")
 
-            # Локальное кэширование
+            # Локальное кэширование - сохраняем данные без cached_at
             if self.local_cache:
-                self.local_cache.set(key, invoice_data)
+                local_invoice_data = invoice_data.copy()
+                local_invoice_data.pop('cached_at', None)  # Удаляем временное поле
+                self.local_cache.set(key, local_invoice_data)
                 self.logger.debug(f"Invoice {invoice_id} cached in local cache")
                 return True
 
@@ -130,6 +132,9 @@ class PaymentCache:
                 local_data = self.local_cache.get(key)
                 if local_data:
                     self.logger.debug(f"Invoice {invoice_id} found in local cache")
+                    # LocalCache возвращает данные в формате {'data': actual_data}
+                    if isinstance(local_data, dict) and 'data' in local_data:
+                        return local_data['data']
                     return local_data
 
             # Если Redis доступен, пробуем Redis
@@ -137,8 +142,46 @@ class PaymentCache:
                 try:
                     self.logger.debug(f"Attempting to get invoice from Redis for {invoice_id}")
                     cached_data = await self._execute_redis_operation('get', key)
-                    if cached_data:
-                        self.logger.debug(f"Redis returned data for invoice {invoice_id}: {cached_data[:100]}...")
+                    self.logger.debug(f"_execute_redis_operation returned: {cached_data} (type: {type(cached_data)})")
+                    if cached_data and isinstance(cached_data, (str, bytes)):
+                        # Логируем только начало данных для безопасности
+                        data_preview = str(cached_data)[:100]
+                        self.logger.debug(f"Redis returned data for invoice {invoice_id}: {data_preview}...")
+                        try:
+                            data = json.loads(cached_data)
+                            self.logger.debug(f"Parsed JSON data: {data}")
+                            # Проверяем свежесть данных
+                            cached_at_str = data.get('cached_at', '')
+                            self.logger.debug(f"cached_at field: {cached_at_str}")
+                            if cached_at_str:
+                                try:
+                                    cached_at = datetime.fromisoformat(cached_at_str)
+                                    current_time = datetime.utcnow()
+                                    time_diff = current_time - cached_at
+                                    self.logger.debug(f"Time difference: {time_diff.total_seconds()} seconds, TTL: {self.INVOICE_TTL}")
+                                    if time_diff < timedelta(seconds=self.INVOICE_TTL):
+                                        # Удаляем временные поля перед возвратом
+                                        data.pop('cached_at', None)
+                                        # Кэшируем в локальном хранилище - сохраняем данные без cached_at
+                                        if self.local_cache:
+                                            self.local_cache.set(key, data)
+                                        self.logger.info(f"Invoice {invoice_id} found in Redis (fresh)")
+                                        return data
+                                    else:
+                                        self.logger.warning(f"Invoice {invoice_id} found in Redis but expired")
+                                        # Данные устарели, удаляем из кеша
+                                        await self._execute_redis_operation('delete', key)
+                                except ValueError as datetime_error:
+                                    self.logger.error(f"Error parsing cached_at for invoice {invoice_id}: {datetime_error}")
+                                    await self._execute_redis_operation('delete', key)
+                            else:
+                                self.logger.warning(f"No cached_at field in Redis data for invoice {invoice_id}")
+                                await self._execute_redis_operation('delete', key)
+                        except json.JSONDecodeError as json_error:
+                            self.logger.error(f"Error parsing JSON from Redis for invoice {invoice_id}: {json_error}")
+                            await self._execute_redis_operation('delete', key)
+                    elif cached_data:
+                        self.logger.debug(f"Redis returned non-string data for invoice {invoice_id}: {type(cached_data)}")
                         try:
                             data = json.loads(cached_data)
                             # Проверяем свежесть данных
@@ -236,6 +279,9 @@ class PaymentCache:
                 local_data = self.local_cache.get(key)
                 if local_data:
                     self.logger.debug(f"Payment status {payment_id} found in local cache")
+                    # LocalCache возвращает данные в формате {'data': actual_data}
+                    if isinstance(local_data, dict) and 'data' in local_data:
+                        return local_data['data']
                     return local_data
 
             # Если Redis доступен, пробуем Redis
@@ -243,10 +289,50 @@ class PaymentCache:
                 try:
                     self.logger.debug(f"Attempting to get payment status from Redis for {payment_id}")
                     cached_data = await self._execute_redis_operation('get', key)
+                    self.logger.debug(f"_execute_redis_operation returned: {cached_data} (type: {type(cached_data)})")
                     if cached_data:
-                        self.logger.debug(f"Redis returned data for payment status {payment_id}: {cached_data[:100]}...")
-                        try:
-                            data = json.loads(cached_data)
+                        # Обрабатываем разные типы данных из Redis
+                        if isinstance(cached_data, (str, bytes)):
+                            # Логируем только начало данных для безопасности
+                            data_preview = str(cached_data)[:100]
+                            self.logger.debug(f"Redis returned data for payment status {payment_id}: {data_preview}...")
+                            try:
+                                data = json.loads(cached_data)
+                                self.logger.debug(f"Parsed JSON data: {data}")
+                                # Проверяем свежесть данных
+                                updated_at_str = data.get('updated_at', '')
+                                self.logger.debug(f"updated_at field: {updated_at_str}")
+                                if updated_at_str:
+                                    try:
+                                        updated_at = datetime.fromisoformat(updated_at_str)
+                                        current_time = datetime.utcnow()
+                                        time_diff = current_time - updated_at
+                                        self.logger.debug(f"Time difference: {time_diff.total_seconds()} seconds, TTL: {self.STATUS_TTL}")
+                                        if time_diff < timedelta(seconds=self.STATUS_TTL):
+                                            # Удаляем временные поля перед возвратом
+                                            data.pop('updated_at', None)
+                                            # Кэшируем в локальном хранилище
+                                            if self.local_cache:
+                                                self.local_cache.set(key, data)
+                                            self.logger.info(f"Payment status {payment_id} found in Redis (fresh)")
+                                            return data
+                                        else:
+                                            self.logger.warning(f"Payment status {payment_id} found in Redis but expired")
+                                            # Данные устарели, удаляем из кеша
+                                            await self._execute_redis_operation('delete', key)
+                                    except ValueError as datetime_error:
+                                        self.logger.error(f"Error parsing updated_at for payment status {payment_id}: {datetime_error}")
+                                        await self._execute_redis_operation('delete', key)
+                                else:
+                                    self.logger.warning(f"No updated_at field in Redis data for payment status {payment_id}")
+                                    await self._execute_redis_operation('delete', key)
+                            except json.JSONDecodeError as json_error:
+                                self.logger.error(f"Error parsing JSON from Redis for payment status {payment_id}: {json_error}")
+                                await self._execute_redis_operation('delete', key)
+                        else:
+                            # Если данные уже распарсены (например, из другого кэша)
+                            self.logger.debug(f"Redis returned non-string data for payment status {payment_id}: {type(cached_data)}")
+                            data = cached_data
                             # Проверяем свежесть данных
                             updated_at_str = data.get('updated_at', '')
                             if updated_at_str:
@@ -270,9 +356,6 @@ class PaymentCache:
                             else:
                                 self.logger.warning(f"No updated_at field in Redis data for payment status {payment_id}")
                                 await self._execute_redis_operation('delete', key)
-                        except json.JSONDecodeError as json_error:
-                            self.logger.error(f"Error parsing JSON from Redis for payment status {payment_id}: {json_error}")
-                            await self._execute_redis_operation('delete', key)
                     else:
                         self.logger.debug(f"No payment status found in Redis for {payment_id}")
                 except Exception as redis_error:
@@ -286,6 +369,9 @@ class PaymentCache:
                             local_data = self.local_cache.get(key)
                             if local_data:
                                 self.logger.info(f"Payment status {payment_id} found in local cache (fallback)")
+                                # LocalCache возвращает данные в формате {'data': actual_data}
+                                if isinstance(local_data, dict) and 'data' in local_data:
+                                    return local_data['data']
                                 return local_data
                             else:
                                 self.logger.debug(f"No payment status found in local cache fallback for {payment_id}")
@@ -310,6 +396,11 @@ class PaymentCache:
                     serialized = json.dumps(details, default=str)
                     await self._execute_redis_operation('setex', key, self.DEFAULT_TTL, serialized)
                     self.logger.debug(f"Payment details {payment_id} cached in Redis")
+                    
+                    # Также сохраняем в локальный кэш для consistency
+                    if self.local_cache:
+                        self.local_cache.set(key, details)
+                    
                     return True
                 except Exception as redis_error:
                     self.logger.warning(f"Failed to cache payment details in Redis, using local cache: {redis_error}")
@@ -336,6 +427,9 @@ class PaymentCache:
                 local_data = self.local_cache.get(key)
                 if local_data:
                     self.logger.debug(f"Payment details {payment_id} found in local cache")
+                    # LocalCache возвращает данные в формате {'data': actual_data}
+                    if isinstance(local_data, dict) and 'data' in local_data:
+                        return local_data['data']
                     return local_data
 
             # Если Redis доступен, пробуем Redis
@@ -343,10 +437,50 @@ class PaymentCache:
                 try:
                     self.logger.debug(f"Attempting to get payment details from Redis for {payment_id}")
                     cached_data = await self._execute_redis_operation('get', key)
+                    self.logger.debug(f"_execute_redis_operation returned: {cached_data} (type: {type(cached_data)})")
                     if cached_data:
-                        self.logger.debug(f"Redis returned data for payment details {payment_id}: {cached_data[:100]}...")
-                        try:
-                            data = json.loads(cached_data)
+                        # Обрабатываем разные типы данных из Redis
+                        if isinstance(cached_data, (str, bytes)):
+                            # Логируем только начало данных для безопасности
+                            data_preview = str(cached_data)[:100]
+                            self.logger.debug(f"Redis returned data for payment details {payment_id}: {data_preview}...")
+                            try:
+                                data = json.loads(cached_data)
+                                self.logger.debug(f"Parsed JSON data: {data}")
+                                # Проверяем свежесть данных
+                                cached_at_str = data.get('cached_at', '')
+                                self.logger.debug(f"cached_at field: {cached_at_str}")
+                                if cached_at_str:
+                                    try:
+                                        cached_at = datetime.fromisoformat(cached_at_str)
+                                        current_time = datetime.utcnow()
+                                        time_diff = current_time - cached_at
+                                        self.logger.debug(f"Time difference: {time_diff.total_seconds()} seconds, TTL: {self.DEFAULT_TTL}")
+                                        if time_diff < timedelta(seconds=self.DEFAULT_TTL):
+                                            # Удаляем временные поля перед возвратом
+                                            data.pop('cached_at', None)
+                                            # Кэшируем в локальном хранилище
+                                            if self.local_cache:
+                                                self.local_cache.set(key, data)
+                                            self.logger.info(f"Payment details {payment_id} found in Redis (fresh)")
+                                            return data
+                                        else:
+                                            self.logger.warning(f"Payment details {payment_id} found in Redis but expired")
+                                            # Данные устарели, удаляем из кеша
+                                            await self._execute_redis_operation('delete', key)
+                                    except ValueError as datetime_error:
+                                        self.logger.error(f"Error parsing cached_at for payment details {payment_id}: {datetime_error}")
+                                        await self._execute_redis_operation('delete', key)
+                                else:
+                                    self.logger.warning(f"No cached_at field in Redis data for payment details {payment_id}")
+                                    await self._execute_redis_operation('delete', key)
+                            except json.JSONDecodeError as json_error:
+                                self.logger.error(f"Error parsing JSON from Redis for payment details {payment_id}: {json_error}")
+                                await self._execute_redis_operation('delete', key)
+                        else:
+                            # Если данные уже распарсены (например, из другого кэша)
+                            self.logger.debug(f"Redis returned non-string data for payment details {payment_id}: {type(cached_data)}")
+                            data = cached_data
                             # Проверяем свежесть данных
                             cached_at_str = data.get('cached_at', '')
                             if cached_at_str:
@@ -370,9 +504,6 @@ class PaymentCache:
                             else:
                                 self.logger.warning(f"No cached_at field in Redis data for payment details {payment_id}")
                                 await self._execute_redis_operation('delete', key)
-                        except json.JSONDecodeError as json_error:
-                            self.logger.error(f"Error parsing JSON from Redis for payment details {payment_id}: {json_error}")
-                            await self._execute_redis_operation('delete', key)
                     else:
                         self.logger.debug(f"No payment details found in Redis for {payment_id}")
                 except Exception as redis_error:
@@ -386,6 +517,9 @@ class PaymentCache:
                             local_data = self.local_cache.get(key)
                             if local_data:
                                 self.logger.info(f"Payment details {payment_id} found in local cache (fallback)")
+                                # LocalCache возвращает данные в формате {'data': actual_data}
+                                if isinstance(local_data, dict) and 'data' in local_data:
+                                    return local_data['data']
                                 return local_data
                             else:
                                 self.logger.debug(f"No payment details found in local cache fallback for {payment_id}")
@@ -436,6 +570,9 @@ class PaymentCache:
                 local_data = self.local_cache.get(key)
                 if local_data:
                     self.logger.debug(f"Payment transaction {payment_id} found in local cache")
+                    # LocalCache возвращает данные в формате {'data': actual_data}
+                    if isinstance(local_data, dict) and 'data' in local_data:
+                        return local_data['data']
                     return local_data
 
             # Если Redis доступен, пробуем Redis
@@ -444,9 +581,48 @@ class PaymentCache:
                     self.logger.debug(f"Attempting to get payment transaction from Redis for {payment_id}")
                     cached_data = await self._execute_redis_operation('get', key)
                     if cached_data:
-                        self.logger.debug(f"Redis returned data for payment transaction {payment_id}: {cached_data[:100]}...")
-                        try:
-                            data = json.loads(cached_data)
+                        # Обрабатываем разные типы данных из Redis
+                        if isinstance(cached_data, (str, bytes)):
+                            # Логируем только начало данных для безопасности
+                            data_preview = str(cached_data)[:100]
+                            self.logger.debug(f"Redis returned data for payment transaction {payment_id}: {data_preview}...")
+                            try:
+                                data = json.loads(cached_data)
+                                self.logger.debug(f"Parsed JSON data: {data}")
+                                # Проверяем свежесть данных
+                                cached_at_str = data.get('cached_at', '')
+                                self.logger.debug(f"cached_at field: {cached_at_str}")
+                                if cached_at_str:
+                                    try:
+                                        cached_at = datetime.fromisoformat(cached_at_str)
+                                        current_time = datetime.utcnow()
+                                        time_diff = current_time - cached_at
+                                        self.logger.debug(f"Time difference: {time_diff.total_seconds()} seconds, TTL: {self.DEFAULT_TTL}")
+                                        if time_diff < timedelta(seconds=self.DEFAULT_TTL):
+                                            # Удаляем временные поля перед возвратом
+                                            data.pop('cached_at', None)
+                                            # Кэшируем в локальном хранилище
+                                            if self.local_cache:
+                                                self.local_cache.set(key, data)
+                                            self.logger.info(f"Payment transaction {payment_id} found in Redis (fresh)")
+                                            return data
+                                        else:
+                                            self.logger.warning(f"Payment transaction {payment_id} found in Redis but expired")
+                                            # Данные устарели, удаляем из кеша
+                                            await self._execute_redis_operation('delete', key)
+                                    except ValueError as datetime_error:
+                                        self.logger.error(f"Error parsing cached_at for payment transaction {payment_id}: {datetime_error}")
+                                        await self._execute_redis_operation('delete', key)
+                                else:
+                                    self.logger.warning(f"No cached_at field in Redis data for payment transaction {payment_id}")
+                                    await self._execute_redis_operation('delete', key)
+                            except json.JSONDecodeError as json_error:
+                                self.logger.error(f"Error parsing JSON from Redis for payment transaction {payment_id}: {json_error}")
+                                await self._execute_redis_operation('delete', key)
+                        else:
+                            # Если данные уже распарсены (например, из другого кэша)
+                            self.logger.debug(f"Redis returned non-string data for payment transaction {payment_id}: {type(cached_data)}")
+                            data = cached_data
                             # Проверяем свежесть данных
                             cached_at_str = data.get('cached_at', '')
                             if cached_at_str:
@@ -470,9 +646,6 @@ class PaymentCache:
                             else:
                                 self.logger.warning(f"No cached_at field in Redis data for payment transaction {payment_id}")
                                 await self._execute_redis_operation('delete', key)
-                        except json.JSONDecodeError as json_error:
-                            self.logger.error(f"Error parsing JSON from Redis for payment transaction {payment_id}: {json_error}")
-                            await self._execute_redis_operation('delete', key)
                     else:
                         self.logger.debug(f"No payment transaction found in Redis for {payment_id}")
                 except Exception as redis_error:
@@ -486,6 +659,9 @@ class PaymentCache:
                             local_data = self.local_cache.get(key)
                             if local_data:
                                 self.logger.info(f"Payment transaction {payment_id} found in local cache (fallback)")
+                                # LocalCache возвращает данные в формате {'data': actual_data}
+                                if isinstance(local_data, dict) and 'data' in local_data:
+                                    return local_data['data']
                                 return local_data
                             else:
                                 self.logger.debug(f"No payment transaction found in local cache fallback for {payment_id}")

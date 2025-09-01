@@ -115,25 +115,32 @@ class RateLimitCache:
         try:
             key = f"{self.USER_RATE_LIMIT_PREFIX}{user_id}:{action}"
             current_time = int(time.time())
+            
+            print(f"DEBUG_RATE_LIMIT: Начало проверки для {key}, limit={limit}, window={window}")
 
             # Удаляем старые записи
             await self._cleanup_old_entries(key, current_time, window)
 
             # Получаем текущее количество
             count = await self._execute_redis_operation('llen', key)
+            print(f"DEBUG_RATE_LIMIT: Ключ: {key}, полученное количество: {count}, лимит: {limit}")
 
             if count >= limit:
                 self.logger.warning(f"User rate limit exceeded for {user_id} on action {action}")
+                print(f"DEBUG_RATE_LIMIT: Лимит превышен! count={count} >= limit={limit}")
                 return False
 
             # Добавляем новую запись
             await self._execute_redis_operation('lpush', key, str(current_time))
             await self._execute_redis_operation('expire', key, window)
+            
+            print(f"DEBUG_RATE_LIMIT: Запрос разрешен, добавлена новая запись")
 
             return True
 
         except Exception as e:
             self.logger.error(f"Error checking user rate limit for {user_id}:{action}: {e}")
+            print(f"DEBUG_RATE_LIMIT: Ошибка: {e}")
             return True
 
     async def check_action_rate_limit(self, action: str, limit: int, window: int = 60) -> bool:

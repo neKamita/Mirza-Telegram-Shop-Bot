@@ -274,22 +274,30 @@ class TestMainApp:
         assert isinstance(settings.api_key, str)
 
     @pytest.mark.asyncio
-    @patch('main.uvicorn')
-    @patch('main.importlib.import_module')
-    async def test_webhook_server_initialization(self, mock_import_module, mock_uvicorn, mock_settings):
+    async def test_webhook_server_initialization(self, mock_settings):
         """Тест инициализации webhook сервера"""
-        # Мокаем импорт uvicorn внутри функции
-        mock_import_module.return_value = mock_uvicorn
+        # Мокаем импорт uvicorn внутри функции run_webhook_server
         
         from main import run_webhook_server
         
+        # Создаем мок для uvicorn
+        mock_uvicorn = Mock()
         mock_config = Mock()
         mock_uvicorn.Config.return_value = mock_config
         mock_server = AsyncMock()
         mock_uvicorn.Server.return_value = mock_server
         
-        await run_webhook_server()
+        # Мокаем builtins.__import__ для перехвата импорта uvicorn
+        original_import = __import__
         
+        def mock_import(name, *args, **kwargs):
+            if name == 'uvicorn':
+                return mock_uvicorn
+            return original_import(name, *args, **kwargs)
+        
+        with patch('builtins.__import__', side_effect=mock_import):
+            await run_webhook_server()
+            
         mock_uvicorn.Config.assert_called_once()
         mock_uvicorn.Server.assert_called_once_with(mock_config)
         mock_server.serve.assert_called_once()

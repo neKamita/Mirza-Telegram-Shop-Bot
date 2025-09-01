@@ -7,7 +7,7 @@ import time
 import traceback
 import asyncio
 from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import redis.asyncio as redis
 from threading import Lock
 from config.settings import settings
@@ -130,21 +130,38 @@ class UserCache:
         try:
             key = f"{self.CACHE_PREFIX}{user_id}:profile"
             # Добавляем timestamp для отслеживания свежести данных
-            user_data['cached_at'] = datetime.utcnow().isoformat()
+            user_data['cached_at'] = datetime.now(timezone.utc).isoformat()
 
             # Пытаемся сохранить в Redis
             if self.redis_client:
                 try:
                     serialized = json.dumps(user_data, default=str)
-                    await self._execute_redis_operation('setex', key, self.PROFILE_TTL, serialized)
+                    print(f"DEBUG: Attempting to save to Redis with setex, key: {key}")
+                    result = await self._execute_redis_operation('setex', key, self.PROFILE_TTL, serialized)
+                    print(f"DEBUG: Redis setex result: {result}")
                     self.logger.debug(f"User profile {user_id} cached in Redis")
+                    
+                    # Также сохраняем в локальный кэш для graceful degradation
+                    if self.local_cache:
+                        # Убираем временные поля для локального кэша
+                        local_data = user_data.copy()
+                        local_data.pop('cached_at', None)
+                        # Сохраняем данные напрямую, LocalCache.get() уже обрабатывает формат
+                        self.local_cache.set(key, local_data)
+                        self.logger.debug(f"User profile {user_id} also cached in local cache for failover")
+                    
                     return True
                 except Exception as redis_error:
+                    print(f"DEBUG: Redis setex failed, error: {redis_error}")
                     self.logger.warning(f"Failed to cache user profile in Redis, using local cache: {redis_error}")
 
             # Локальное кэширование
             if self.local_cache:
-                self.local_cache.set(key, user_data)
+                # Убираем временные поля для локального кэша
+                local_data = user_data.copy()
+                local_data.pop('cached_at', None)
+                # Сохраняем данные напрямую, LocalCache.get() уже обрабатывает формат
+                self.local_cache.set(key, local_data)
                 self.logger.debug(f"User profile {user_id} cached in local cache")
                 return True
 
@@ -158,38 +175,54 @@ class UserCache:
         """Получение профиля пользователя из кеша с graceful degradation"""
         try:
             key = f"{self.CACHE_PREFIX}{user_id}:profile"
+            print(f"DEBUG: get_user_profile called for user_id: {user_id}, key: {key}")
 
             # Сначала пробуем локальный кэш
             if self.local_cache:
+                print(f"DEBUG: Checking local cache for key: {key}")
                 local_data = self.local_cache.get(key)
+                print(f"DEBUG: Local cache result for key {key}: {local_data}")
                 if local_data:
                     self.logger.debug(f"User profile {user_id} found in local cache")
                     # LocalCache возвращает данные в формате {'data': value}
                     if isinstance(local_data, dict) and 'data' in local_data:
+                        print(f"DEBUG: Returning data from local cache: {local_data['data']}")
                         return local_data['data']
+                    print(f"DEBUG: Returning local data directly: {local_data}")
                     return local_data
+                else:
+                    print(f"DEBUG: No data found in local cache for key: {key}")
 
             # Если Redis доступен, пробуем Redis
             if self.redis_client:
                 try:
                     self.logger.debug(f"Attempting to get profile from Redis for user {user_id}")
+                    print(f"DEBUG: Getting Redis data for key: {key}")
                     cached_data = await self._execute_redis_operation('get', key)
-                    if cached_data:
-                        self.logger.debug(f"Redis returned data for user {user_id}: {cached_data[:100]}...")
+                    print(f"DEBUG: Redis get result for key {key}: {cached_data}")
+                    if cached_data and isinstance(cached_data, (str, bytes)):
+                        # Логируем только начало данных для безопасности
+                        data_preview = str(cached_data)[:100]
+                        self.logger.debug(f"Redis returned data for user {user_id}: {data_preview}...")
                         try:
                             data = json.loads(cached_data)
+                            print(f"DEBUG: Parsed Redis data: {data}")
                             # Проверяем свежесть данных
                             cached_at_str = data.get('cached_at', '')
                             if cached_at_str:
                                 try:
                                     cached_at = datetime.fromisoformat(cached_at_str)
-                                    if datetime.utcnow() - cached_at < timedelta(seconds=self.PROFILE_TTL):
+                                    now = datetime.now(timezone.utc)
+                                    time_diff = now - cached_at
+                                    ttl_delta = timedelta(seconds=self.PROFILE_TTL)
+                                    if time_diff < ttl_delta:
                                         # Удаляем временные поля перед возвратом
                                         data.pop('cached_at', None)
                                         # Кэшируем в локальном хранилище
                                         if self.local_cache:
                                             self.local_cache.set(key, data)
                                         self.logger.info(f"User profile {user_id} found in Redis (fresh)")
+                                        print(f"DEBUG: Returning fresh data from Redis: {data}")
                                         return data
                                     else:
                                         self.logger.warning(f"User profile {user_id} found in Redis but expired")
@@ -204,8 +237,12 @@ class UserCache:
                         except json.JSONDecodeError as json_error:
                             self.logger.error(f"Error parsing JSON from Redis for user {user_id}: {json_error}")
                             await self._execute_redis_operation('delete', key)
+                    elif cached_data:
+                        self.logger.debug(f"Redis returned non-string data for user {user_id}: {type(cached_data)}")
+                        print(f"DEBUG: Redis returned non-string data: {cached_data}")
                     else:
                         self.logger.debug(f"No profile found in Redis for user {user_id}")
+                        print(f"DEBUG: No data found in Redis for key: {key}")
                 except Exception as redis_error:
                     self.logger.error(f"Failed to get user profile from Redis: {redis_error}")
                     self.logger.error(f"Redis error type: {type(redis_error).__name__}")
@@ -238,7 +275,7 @@ class UserCache:
             key = f"{self.CACHE_PREFIX}{user_id}:balance"
             balance_data = {
                 'balance': balance,
-                'cached_at': datetime.utcnow().isoformat()
+                'cached_at': datetime.now(timezone.utc).isoformat()
             }
             
             self.logger.debug(f"Attempting to cache user balance for user_id: {user_id}, balance: {balance}")
@@ -315,8 +352,10 @@ class UserCache:
                     except Exception as e:
                         self.logger.error(f"Redis client error: {e}")
                         cached_data = None
-                    if cached_data:
-                        self.logger.debug(f"Redis returned data for user {user_id}: {cached_data[:100]}...")
+                    if cached_data and isinstance(cached_data, (str, bytes)):
+                        # Логируем только начало данных для безопасности
+                        data_preview = str(cached_data)[:100]
+                        self.logger.debug(f"Redis returned data for user {user_id}: {data_preview}...")
                         try:
                             data = json.loads(cached_data)
                             # Проверяем свежесть данных
@@ -324,7 +363,10 @@ class UserCache:
                             if cached_at_str:
                                 try:
                                     cached_at = datetime.fromisoformat(cached_at_str)
-                                    if datetime.utcnow() - cached_at < timedelta(seconds=self.BALANCE_TTL):
+                                    now = datetime.now(timezone.utc)
+                                    time_diff = now - cached_at
+                                    ttl_delta = timedelta(seconds=self.BALANCE_TTL)
+                                    if time_diff < ttl_delta:
                                         balance = data['balance']
                                         self.logger.info(f"User balance {user_id} found in Redis (fresh): {balance}")
                                         # Кэшируем в локальном хранилище
@@ -333,7 +375,7 @@ class UserCache:
                                         return balance
                                     else:
                                         self.logger.warning(f"User balance {user_id} found in Redis but expired")
-                                        # Данные устарели, удаляем из кеша
+                                        # Данные устарели, удалов из кеша
                                         await self._execute_redis_operation('delete', key)
                                 except ValueError as datetime_error:
                                     self.logger.error(f"Error parsing cached_at for user {user_id}: {datetime_error}")
@@ -344,6 +386,8 @@ class UserCache:
                         except json.JSONDecodeError as json_error:
                             self.logger.error(f"Error parsing JSON from Redis for user {user_id}: {json_error}")
                             await self._execute_redis_operation('delete', key)
+                    elif cached_data:
+                        self.logger.debug(f"Redis returned non-string data for user {user_id}: {type(cached_data)}")
                     else:
                         self.logger.debug(f"No balance found in Redis for user {user_id}")
                 except Exception as redis_error:
@@ -384,7 +428,7 @@ class UserCache:
             key = f"{self.CACHE_PREFIX}{user_id}:balance"
             balance_data = {
                 'balance': new_balance,
-                'cached_at': datetime.utcnow().isoformat()
+                'cached_at': datetime.now(timezone.utc).isoformat()
             }
             serialized = json.dumps(balance_data, default=str)
             
@@ -426,7 +470,7 @@ class UserCache:
         """Кеширование активности пользователя с graceful degradation"""
         try:
             key = f"{self.CACHE_PREFIX}{user_id}:activity"
-            activity_data['cached_at'] = datetime.utcnow().isoformat()
+            activity_data['cached_at'] = datetime.now(timezone.utc).isoformat()
 
             # Пытаемся сохранить в Redis
             if self.redis_client:
@@ -476,8 +520,12 @@ class UserCache:
                 try:
                     self.logger.debug(f"Attempting to get activity from Redis for user {user_id}")
                     cached_data = await self._execute_redis_operation('get', key)
-                    if cached_data:
-                        self.logger.debug(f"Redis returned data for user {user_id}: {cached_data[:100]}...")
+                    if cached_data and isinstance(cached_data, (str, bytes)):
+                        # Логируем только начало данных для безопасности
+                        data_preview = str(cached_data)[:100]
+                        self.logger.debug(f"Redis returned data for user {user_id}: {data_preview}...")
+                    elif cached_data:
+                        self.logger.debug(f"Redis returned non-string data for user {user_id}: {type(cached_data)}")
                         try:
                             data = json.loads(cached_data)
                             # Проверяем свежесть данных
@@ -568,10 +616,12 @@ class UserCache:
                             keys_to_remove.append(key)
                     
                     if keys_to_remove:
+                        print(f"DEBUG: Found {len(keys_to_remove)} keys to remove from local cache: {keys_to_remove}")
                         for key in keys_to_remove:
                             self.local_cache._remove_key(key)
                         self.logger.info(f"Successfully removed {len(keys_to_remove)} keys from local cache for user {user_id}")
                     else:
+                        print(f"DEBUG: No keys found for user {user_id} in local cache")
                         self.logger.debug(f"No keys found for user {user_id} in local cache")
                 except Exception as local_error:
                     self.logger.error(f"Error invalidating local cache for user {user_id}: {local_error}")
