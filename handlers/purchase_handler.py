@@ -670,6 +670,16 @@ class PurchaseHandler(BaseHandler):
             callback: Callback запрос
             bot: Экземпляр бота
         """
+        # Проверяем наличие пользователя
+        if not callback.from_user or not callback.from_user.id:
+            self.logger.warning("Callback received without user information")
+            await callback.answer(
+                "❌ <b>Ошибка: отсутствуют данные пользователя</b>\n\n"
+                "🔍 <i>Пожалуйста, попробуйте снова</i>",
+                show_alert=True
+            )
+            return
+            
         # Проверяем rate limit для всех callback операций
         user_id = callback.from_user.id
         if not await self.check_rate_limit(user_id, "operation", 20, 60):
