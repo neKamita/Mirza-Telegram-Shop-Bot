@@ -73,7 +73,7 @@ class ErrorHandler(BaseHandler):
         
         # Проверяем на ошибки валидации
         validation_error_patterns = [
-            "validation", "валидация", "invalid", "некорректный", "неправильный",
+            "validation", "валидация", "invalid", "некорректный", "некорректные", "неправильный",
             "format", "format error", "invalid input", "wrong format"
         ]
         
@@ -141,7 +141,7 @@ class ErrorHandler(BaseHandler):
         
         # Используем MessageTemplate для генерации сообщений об ошибках
         error_mapping = {
-            PurchaseErrorType.INSUFFICIENT_BALANCE: 'validation',
+            PurchaseErrorType.INSUFFICIENT_BALANCE: 'payment',  # Changed from 'validation' to include payment_id
             PurchaseErrorType.NETWORK_ERROR: 'network',
             PurchaseErrorType.PAYMENT_SYSTEM_ERROR: 'payment',
             PurchaseErrorType.VALIDATION_ERROR: 'validation',

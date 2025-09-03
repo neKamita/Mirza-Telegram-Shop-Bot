@@ -7,7 +7,7 @@ import logging
 import time
 import uuid
 from typing import Optional, Dict, Any, List, Union
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
 from threading import Lock
 import weakref
@@ -69,10 +69,10 @@ class LocalCache:
 
             if key in self.cache:
                 self.access_times[key] = time.time()
-                data = self.cache[key].copy()
-                data.pop('created_at', None)  # Удаляем служебное поле
-                return data
-
+                cached_data = self.cache[key]
+                # Извлекаем данные из структуры {'data': value, 'created_at': timestamp}
+                return cached_data.get('data')
+                
             return None
 
     def set(self, key: str, value: Dict[str, Any]) -> bool:
@@ -280,66 +280,97 @@ class SessionCache:
 
     async def _execute_redis_operation(self, operation: str, *args, **kwargs) -> Any:
         """Выполнение Redis операции с retry и Circuit Breaker"""
+        print(f"DEBUG _execute_redis_operation: STARTED with operation: {operation}, args: {args}, kwargs: {kwargs}")
+        print(f"DEBUG: redis_healthy: {self.redis_healthy}")
+        print(f"DEBUG: redis_client: {self.redis_client}")
+        print(f"DEBUG: redis_client type: {type(self.redis_client)}")
 
         if not self.redis_healthy:
             self.logger.warning("Redis is not healthy, using local cache fallback")
+            print("DEBUG: Redis not healthy, raising ConnectionError")
             raise ConnectionError("Redis is not available")
 
         # Оборачиваем в Circuit Breaker
         try:
-            self.logger.info(f"Executing Redis operation: {operation}")
+            self.logger.debug(f"Executing Redis operation: {operation}")
+            print(f"DEBUG _execute_redis_operation: Calling Circuit Breaker for operation: {operation}")
 
             # Проверяем тип Redis клиента
-            self.logger.info(f"Redis client type: {type(self.redis_client)}")
-            self.logger.info(f"Redis client module: {self.redis_client.__class__.__module__}")
+            print(f"DEBUG: Getting redis method for operation: {operation}")
+            redis_method = getattr(self.redis_client, operation)
+            self.logger.debug(f"Redis method: {redis_method}, type: {type(redis_method)}")
+            print(f"DEBUG: Redis method: {redis_method}, type: {type(redis_method)}")
 
-            # Для AsyncRedisCluster всегда используем async методы с префиксом 'a'
-            async_method = f'a{operation}'
+            # Проверяем, является ли метод корутиной
+            import asyncio
+            is_async = asyncio.iscoroutinefunction(redis_method)
+            self.logger.debug(f"Redis method is async: {is_async}")
+            print(f"DEBUG: Redis method is async: {is_async}")
 
-            if hasattr(self.redis_client, async_method):
-                # Используем async метод с префиксом 'a'
-                redis_async_method = getattr(self.redis_client, async_method)
-                self.logger.info(f"Using async method: {async_method}")
-                self.logger.info(f"Circuit breaker call with async method: {async_method}")
-                self.logger.info(f"Circuit breaker type: {type(self.circuit_breaker)}")
-                self.logger.info(f"Circuit breaker call method: {self.circuit_breaker.call}")
-
-                # Дополнительная проверка перед вызовом
-                self.logger.info(f"About to call circuit_breaker.call with async method: {async_method}")
-                self.logger.info(f"Circuit breaker state before call: {self.circuit_breaker.get_state()}")
-
+            if is_async:
+                # Асинхронный метод - вызываем напрямую через Circuit Breaker
+                self.logger.debug(f"Calling async method: {operation}")
+                print(f"DEBUG: About to call circuit_breaker.call with method: {redis_method}, args: {args}, kwargs: {kwargs}")
+                print(f"DEBUG: circuit_breaker type: {type(self.circuit_breaker)}")
+                print(f"DEBUG: circuit_breaker.call type: {type(self.circuit_breaker.call)}")
+                print(f"DEBUG: circuit_breaker.call is AsyncMock: {hasattr(self.circuit_breaker.call, 'call_count')}")
+                print(f"DEBUG: circuit_breaker.call._mock_name: {getattr(self.circuit_breaker.call, '_mock_name', 'no _mock_name')}")
+                # call_count доступен только для mock объектов в тестах
+                print(f"DEBUG: circuit_breaker.call type: {type(self.circuit_breaker.call)}")
+                
+                # Проверяем, что redis_method - это действительно метод Redis клиента
+                print(f"DEBUG: redis_method: {redis_method}")
+                print(f"DEBUG: redis_method type: {type(redis_method)}")
+                
+                # Проверяем, что redis_method - это метод Redis клиента, а не строка
+                if isinstance(redis_method, str):
+                    print(f"DEBUG: ERROR - redis_method is a string, not a method: {redis_method}")
+                    # Попытаемся получить настоящий метод
+                    actual_method = getattr(self.redis_client, operation)
+                    print(f"DEBUG: Actual redis method: {actual_method}, type: {type(actual_method)}")
+                    redis_method = actual_method
+                
+                # Вызываем Circuit Breaker напрямую
                 try:
+                    print(f"DEBUG: Calling circuit_breaker.call with redis_method: {redis_method}")
                     result = await self.circuit_breaker.call(
-                        redis_async_method,
+                        redis_method,
                         *args, **kwargs
                     )
-                    self.logger.info(f"Async method call succeeded, result type: {type(result)}, value: {result}")
-                except Exception as e:
-                    self.logger.error(f"Async method call failed: {e}")
-                    self.logger.error(f"Exception type: {type(e)}")
+                    
+                    print(f"DEBUG: circuit_breaker.call completed, result: {result}")
+                # call_count доступен только для mock объектов в тестах
+                    self.logger.debug(f"Async method call succeeded, result type: {type(result)}")
+                except Exception as cb_error:
+                    print(f"DEBUG: Circuit Breaker call failed: {cb_error}")
+                    print(f"DEBUG: Error type: {type(cb_error)}")
+                    import traceback
+                    print(f"DEBUG: Traceback: {traceback.format_exc()}")
                     raise
             else:
-                # Fallback на обычный метод если async версия не найдена
-                redis_method = getattr(self.redis_client, operation)
-                self.logger.info(f"Async method {async_method} not found, using fallback method: {operation}")
-                self.logger.info(f"Using asyncio.to_thread for sync method: {operation}")
+                # Синхронный метод - используем asyncio.to_thread
+                self.logger.debug(f"Using asyncio.to_thread for sync method: {operation}")
+                print(f"DEBUG: Using asyncio.to_thread for sync method: {operation}")
+                print(f"DEBUG: redis_method: {redis_method}")
+                print(f"DEBUG: args: {args}, kwargs: {kwargs}")
 
-                # Создаем оберточную функцию для Circuit Breaker
                 def wrapped_redis_operation():
-                    self.logger.info(f"Executing Redis operation: {operation}")
+                    self.logger.debug(f"Executing Redis operation: {operation}")
+                    print(f"DEBUG: Executing Redis operation in thread: {operation}")
                     try:
                         result = redis_method(*args, **kwargs)
-                        self.logger.info(f"Redis operation {operation} succeeded, result: {result} (type: {type(result)})")
+                        self.logger.debug(f"Redis operation {operation} succeeded, result type: {type(result)}")
+                        print(f"DEBUG: Redis operation {operation} succeeded, result: {result}, type: {type(result)}")
                         return result
                     except Exception as e:
                         self.logger.error(f"Redis operation {operation} failed: {e}")
+                        print(f"DEBUG: Redis operation {operation} failed: {e}")
                         raise
 
-                # Используем asyncio.to_thread для синхронной операции
                 result = await asyncio.to_thread(wrapped_redis_operation)
-                self.logger.info(f"Redis operation {operation} completed in to_thread, result: {result} (type: {type(result)})")
+                self.logger.debug(f"Redis operation {operation} completed in to_thread, result type: {type(result)}")
+                print(f"DEBUG: Redis operation completed in to_thread, result: {result}")
 
-            self.logger.info(f"Redis operation {operation} completed successfully, result type: {type(result)}")
             # Обновляем статистику при успехе
             self.stats['redis_hits'] += 1
             return result
@@ -400,8 +431,8 @@ class SessionCache:
             # Данные сессии
             session_data = {
                 'user_id': user_id,
-                'created_at': datetime.utcnow().isoformat(),
-                'last_activity': datetime.utcnow().isoformat(),
+                'created_at': datetime.now(timezone.utc).isoformat(),
+                'last_activity': datetime.now(timezone.utc).isoformat(),
                 'is_active': True,
                 'id': session_id  # Добавляем ID для удобства
             }
@@ -516,6 +547,10 @@ class SessionCache:
 
     async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Получение сессии по ID с graceful degradation"""
+        # Валидация входных параметров
+        if not session_id:
+            raise ValueError("Session ID cannot be empty or None")
+            
         cache_key = self._get_cache_key(session_id)
         self.logger.debug(f"Getting session for ID: {session_id}, cache_key: {cache_key}")
 
@@ -556,7 +591,7 @@ class SessionCache:
                         # Проверяем активность и свежесть
                         if session_data.get('is_active') and self._is_session_valid(session_data):
                             # Обновляем время последней активности
-                            session_data['last_activity'] = datetime.utcnow().isoformat()
+                            session_data['last_activity'] = datetime.now(timezone.utc).isoformat()
                             await self.update_session(session_id, session_data)
 
                             # Кэшируем в локальном хранилище
@@ -567,7 +602,7 @@ class SessionCache:
                             return session_data
                         else:
                             # Сессия неактивна или устарела
-                            self.logger.debug(f"Session {session_id} is inactive or expired")
+                            self.logger.debug(f"Session {session_id} is inactive or expired, is_active: {session_data.get('is_active')}, valid: {self._is_session_valid(session_data)}")
                             await self.delete_session(session_id)
 
                     except json.JSONDecodeError as json_error:
@@ -594,8 +629,12 @@ class SessionCache:
 
     async def update_session(self, session_id: str, session_data: Dict[str, Any]) -> bool:
         """Обновление данных сессии с graceful degradation"""
+        # Валидация входных параметров
+        if not session_id:
+            raise ValueError("Session ID cannot be empty or None")
+            
         try:
-            session_data['last_activity'] = datetime.utcnow().isoformat()
+            session_data['last_activity'] = datetime.now(timezone.utc).isoformat()
             serialized = json.dumps(session_data, default=str)
 
             # Пытаемся обновить в Redis
@@ -628,6 +667,10 @@ class SessionCache:
 
     async def delete_session(self, session_id: str) -> bool:
         """Удаление сессии с graceful degradation"""
+        # Валидация входных параметров
+        if not session_id:
+            raise ValueError("Session ID cannot be empty or None")
+            
         try:
             # Удаляем из Redis если доступен
             if self.redis_healthy:
@@ -639,10 +682,17 @@ class SessionCache:
                     await self._execute_redis_operation('delete', f"{self.SESSION_DATA_PREFIX}{session_id}")
                     await self._execute_redis_operation('delete', f"{self.SESSION_STATE_PREFIX}{session_id}")
 
-                    # Удаляем из индекса пользователя
-                    session_data = await self.get_session(session_id)
-                    if session_data:
-                        await self._remove_from_user_index_redis(session_id, session_data)
+                    # Удаляем из индекса пользователя (используем прямой подход без рекурсивного вызова)
+                    try:
+                        # Пытаемся получить данные сессии напрямую из Redis, чтобы избежать рекурсии
+                        session_key = f"{self.SESSION_PREFIX}{session_id}"
+                        cached_data = await self._execute_redis_operation('get', session_key)
+                        if cached_data:
+                            session_data = json.loads(cached_data)
+                            if session_data and 'user_id' in session_data:
+                                await self._remove_from_user_index_redis(session_id, session_data)
+                    except Exception as index_error:
+                        self.logger.warning(f"Failed to remove session from user index: {index_error}")
 
                 except Exception as redis_error:
                     self.logger.warning(f"Failed to delete session from Redis, cleaning local cache: {redis_error}")
@@ -688,8 +738,12 @@ class SessionCache:
                 user_sessions_key = f"user_sessions:{user_id}"
                 self.logger.debug(f"Getting user sessions for user {user_id}, key: {user_sessions_key}")
 
+                # DEBUG: Добавляем информацию о вызове _execute_redis_operation
+                print(f"DEBUG: About to call _execute_redis_operation for lrange on {user_sessions_key}")
+                
                 session_ids = await self._execute_redis_operation('lrange', user_sessions_key, 0, -1)
                 self.logger.debug(f"Found {len(session_ids)} session IDs for user {user_id}")
+                print(f"DEBUG: Got session_ids from Redis: {session_ids} (type: {type(session_ids)})")
 
                 for session_id_bytes in session_ids:
                     try:
@@ -703,19 +757,24 @@ class SessionCache:
                             session_id = str(session_id_bytes)
 
                         self.logger.debug(f"Processing session ID: {session_id}")
+                        print(f"DEBUG: Processing session ID: {session_id}")
 
                         session = await self.get_session(session_id)
                         if session:
                             self.logger.debug(f"Found session for {session_id}: {session}")
+                            print(f"DEBUG: Found session: {session}")
                             sessions.append(session)
                         else:
                             self.logger.debug(f"No session found for ID: {session_id}")
+                            print(f"DEBUG: No session found for ID: {session_id}")
 
                     except Exception as session_error:
                         self.logger.error(f"Error processing session ID {session_id_bytes}: {session_error}")
+                        print(f"DEBUG: Error processing session ID {session_id_bytes}: {session_error}")
                         continue
 
                 self.logger.info(f"Retrieved {len(sessions)} sessions for user {user_id} from Redis")
+                print(f"DEBUG: Returning {len(sessions)} sessions from Redis")
                 return sessions
 
             except Exception as e:
@@ -723,16 +782,19 @@ class SessionCache:
                 self.logger.error(f"Error type: {type(e)}")
                 import traceback
                 self.logger.error(f"Traceback: {traceback.format_exc()}")
+                print(f"DEBUG: Redis operation failed: {e}")
 
         # Локальное кэширование
         if hasattr(self, '_local_user_sessions'):
             user_sessions_key = f"local_user_sessions:{user_id}"
             if user_sessions_key in self._local_user_sessions:
+                print(f"DEBUG: Checking local user sessions for key: {user_sessions_key}")
                 for session_id in self._local_user_sessions[user_sessions_key]:
                     session = await self.get_session(session_id)
                     if session:
                         sessions.append(session)
 
+        print(f"DEBUG: Final result: {len(sessions)} sessions")
         return sessions
 
     async def invalidate_user_sessions(self, user_id: int, keep_active: bool = False) -> int:
@@ -757,7 +819,7 @@ class SessionCache:
     async def cache_session_data(self, session_id: str, data: Dict[str, Any]) -> bool:
         """Кеширование данных сессии с graceful degradation"""
         try:
-            data['cached_at'] = datetime.utcnow().isoformat()
+            data['cached_at'] = datetime.now(timezone.utc).isoformat()
             serialized = json.dumps(data, default=str)
 
             # Пытаемся сохранить в Redis
@@ -789,14 +851,27 @@ class SessionCache:
             cache_key = f"{self._get_cache_key(session_id)}_data"
             local_data = self.local_cache.get(cache_key)
             if local_data:
-                # Проверяем свежесть
-                cached_at = datetime.fromisoformat(local_data.get('cached_at', ''))
-                if datetime.utcnow() - cached_at < timedelta(seconds=self.SESSION_TTL):
+                # Проверяем свежесть (только если есть cached_at)
+                cached_at_str = local_data.get('cached_at', '')
+                if cached_at_str:
+                    try:
+                        cached_at = datetime.fromisoformat(cached_at_str)
+                        if datetime.now(timezone.utc) - cached_at < timedelta(seconds=self.SESSION_TTL):
+                            data = local_data.copy()
+                            data.pop('cached_at', None)
+                            return data
+                        else:
+                            self.logger.debug(f"Local cache data expired for session {session_id}")
+                            self.local_cache.delete(cache_key)
+                    except (ValueError, TypeError):
+                        # Если некорректный формат даты, удаляем запись
+                        self.logger.debug(f"Invalid cached_at format in local cache for session {session_id}")
+                        self.local_cache.delete(cache_key)
+                else:
+                    # Если нет cached_at, считаем данные свежими (для обратной совместимости)
                     data = local_data.copy()
                     data.pop('cached_at', None)
                     return data
-                else:
-                    self.local_cache.delete(cache_key)
 
         # Пробуем Redis если доступен
         if self.redis_healthy:
@@ -807,16 +882,47 @@ class SessionCache:
                 if cached_data:
                     data = json.loads(cached_data)
                     # Проверяем свежесть
-                    cached_at = datetime.fromisoformat(data.get('cached_at', ''))
-                    if datetime.utcnow() - cached_at < timedelta(seconds=self.SESSION_TTL):
+                    cached_at_str = data.get('cached_at', '')
+                    if cached_at_str:
+                        try:
+                            cached_at = datetime.fromisoformat(cached_at_str)
+                            # Если datetime naive (без timezone), добавляем UTC для корректного сравнения
+                            if cached_at.tzinfo is None:
+                                cached_at = cached_at.replace(tzinfo=timezone.utc)
+                            current_time = datetime.now(timezone.utc)
+                            time_diff = current_time - cached_at
+                            ttl_delta = timedelta(seconds=self.SESSION_TTL)
+                            self.logger.debug(f"Redis data cached_at: {cached_at}, current_time: {current_time}, diff: {time_diff}, TTL: {ttl_delta}")
+                            self.logger.debug(f"Expiration check: {time_diff} < {ttl_delta} = {time_diff < ttl_delta}")
+                            
+                            if time_diff < ttl_delta:
+                                data.pop('cached_at', None)
+                                # Кэшируем в локальном хранилище (только данные, без cached_at)
+                                if self.local_cache:
+                                    cache_key = f"{self._get_cache_key(session_id)}_data"
+                                    # Создаем копию данных без cached_at для локального кэша
+                                    cache_data = data.copy()
+                                    self.local_cache.set(cache_key, cache_data)
+                                return data
+                            else:
+                                self.logger.debug(f"Redis data expired for session {session_id}")
+                                await self._execute_redis_operation('delete', data_key)
+                                return None
+                        except (ValueError, TypeError) as e:
+                            # Если некорректный формат даты, удаляем запись
+                            self.logger.debug(f"Invalid cached_at format in Redis for session {session_id}: {e}")
+                            await self._execute_redis_operation('delete', data_key)
+                            return None
+                    else:
+                        # Если нет cached_at, считаем данные свежими (для обратной совместимости)
                         data.pop('cached_at', None)
-                        # Кэшируем в локальном хранилище
+                        # Кэшируем в локальном хранилище (только данные, без cached_at)
                         if self.local_cache:
                             cache_key = f"{self._get_cache_key(session_id)}_data"
-                            self.local_cache.set(cache_key, data)
+                            # Создаем копию данных без cached_at для локального кэша
+                            cache_data = data.copy()
+                            self.local_cache.set(cache_key, cache_data)
                         return data
-                    else:
-                        await self._execute_redis_operation('delete', data_key)
 
                 return None
 
@@ -828,7 +934,7 @@ class SessionCache:
     async def cache_session_state(self, session_id: str, state: Dict[str, Any]) -> bool:
         """Кеширование состояния сессии с graceful degradation"""
         try:
-            state['updated_at'] = datetime.utcnow().isoformat()
+            state['updated_at'] = datetime.now(timezone.utc).isoformat()
             serialized = json.dumps(state, default=str)
 
             # Пытаемся сохранить в Redis
@@ -861,13 +967,27 @@ class SessionCache:
             local_data = self.local_cache.get(cache_key)
             if local_data:
                 # Проверяем свежесть
-                updated_at = datetime.fromisoformat(local_data.get('updated_at', ''))
-                if datetime.utcnow() - updated_at < timedelta(seconds=self.SESSION_TTL):
+                updated_at_str = local_data.get('updated_at', '')
+                if updated_at_str:
+                    try:
+                        updated_at = datetime.fromisoformat(updated_at_str)
+                        # Если datetime naive (без timezone), добавляем UTC для корректного сравнения
+                        if updated_at.tzinfo is None:
+                            updated_at = updated_at.replace(tzinfo=timezone.utc)
+                        if datetime.now(timezone.utc) - updated_at < timedelta(seconds=self.SESSION_TTL):
+                            data = local_data.copy()
+                            data.pop('updated_at', None)
+                            return data
+                        else:
+                            self.local_cache.delete(cache_key)
+                    except (ValueError, TypeError):
+                        # Если некорректный формат даты, удаляем запись
+                        self.local_cache.delete(cache_key)
+                else:
+                    # Если нет updated_at, считаем данные свежими
                     data = local_data.copy()
                     data.pop('updated_at', None)
                     return data
-                else:
-                    self.local_cache.delete(cache_key)
 
         # Пробуем Redis если доступен
         if self.redis_healthy:
@@ -878,16 +998,33 @@ class SessionCache:
                 if cached_data:
                     state = json.loads(cached_data)
                     # Проверяем свежесть
-                    updated_at = datetime.fromisoformat(state.get('updated_at', ''))
-                    if datetime.utcnow() - updated_at < timedelta(seconds=self.SESSION_TTL):
+                    updated_at_str = state.get('updated_at', '')
+                    if updated_at_str:
+                        try:
+                            updated_at = datetime.fromisoformat(updated_at_str)
+                            # Если datetime naive (без timezone), добавляем UTC для корректного сравнения
+                            if updated_at.tzinfo is None:
+                                updated_at = updated_at.replace(tzinfo=timezone.utc)
+                            if datetime.now(timezone.utc) - updated_at < timedelta(seconds=self.SESSION_TTL):
+                                state.pop('updated_at', None)
+                                # Кэшируем в локальном хранилище
+                                if self.local_cache:
+                                    cache_key = f"{self._get_cache_key(session_id)}_state"
+                                    self.local_cache.set(cache_key, state)
+                                return state
+                            else:
+                                await self._execute_redis_operation('delete', state_key)
+                        except (ValueError, TypeError):
+                            # Если некорректный формат даты, удаляем запись
+                            await self._execute_redis_operation('delete', state_key)
+                    else:
+                        # Если нет updated_at, считаем данные свежими
                         state.pop('updated_at', None)
                         # Кэшируем в локальном хранилище
                         if self.local_cache:
                             cache_key = f"{self._get_cache_key(session_id)}_state"
                             self.local_cache.set(cache_key, state)
                         return state
-                    else:
-                        await self._execute_redis_operation('delete', state_key)
 
                 return None
 
@@ -936,12 +1073,25 @@ class SessionCache:
     def _is_session_valid(self, session_data: Dict[str, Any]) -> bool:
         """Проверка валидности сессии"""
         try:
-            last_activity = datetime.fromisoformat(session_data.get('last_activity', ''))
+            last_activity_str = session_data.get('last_activity', '')
+            if not last_activity_str:
+                return False
+                
+            last_activity = datetime.fromisoformat(last_activity_str)
+            # Убеждаемся, что last_activity имеет временную зону
+            if last_activity.tzinfo is None:
+                last_activity = last_activity.replace(tzinfo=timezone.utc)
+                
             max_inactive = timedelta(minutes=30)  # 30 минут бездействия
+            current_time = datetime.now(timezone.utc)
+            time_diff = current_time - last_activity
+            
+            self.logger.debug(f"Session validation: current_time={current_time}, last_activity={last_activity}, diff={time_diff}, max_inactive={max_inactive}, valid={time_diff < max_inactive}")
+            
+            return time_diff < max_inactive
 
-            return datetime.utcnow() - last_activity < max_inactive
-
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Error validating session: {e}")
             return False
 
     async def get_session_stats(self) -> Dict[str, Any]:
@@ -1082,14 +1232,25 @@ class SessionCache:
 
                             self.logger.debug(f"Checking session for expiration: {session_id}")
 
-                            session = await self.get_session(session_id)
-
-                            if session and not self._is_session_valid(session):
-                                self.logger.info(f"Cleaning up expired session: {session_id}")
-                                await self.delete_session(session_id)
-                                cleaned_count += 1
-                            elif session:
-                                self.logger.debug(f"Session {session_id} is still valid")
+                            # Получаем данные сессии напрямую из Redis, чтобы избежать рекурсивных вызовов
+                            session_key = f"{self.SESSION_PREFIX}{session_id}"
+                            cached_data = await self._execute_redis_operation('get', session_key)
+                            
+                            if cached_data:
+                                try:
+                                    session_data = json.loads(cached_data)
+                                    if not self._is_session_valid(session_data):
+                                        self.logger.info(f"Cleaning up expired session: {session_id}")
+                                        await self.delete_session(session_id)
+                                        cleaned_count += 1
+                                    else:
+                                        self.logger.debug(f"Session {session_id} is still valid")
+                                except json.JSONDecodeError:
+                                    self.logger.error(f"Invalid JSON for session {session_id}, cleaning up")
+                                    await self.delete_session(session_id)
+                                    cleaned_count += 1
+                            else:
+                                self.logger.debug(f"Session {session_id} not found in Redis")
 
                         except Exception as key_error:
                             self.logger.error(f"Error processing session key {key}: {key_error}")

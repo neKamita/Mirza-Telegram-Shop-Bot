@@ -27,16 +27,20 @@ class HealthService:
 
             # Для RedisCluster ping() возвращает bool, для обычного Redis - корутину
             if self.is_cluster:
+                # Для кластера используем синхронный вызов
                 ping_result = self.redis_client.ping()
             else:
+                # Для обычного Redis используем асинхронный вызов
                 ping_result = await self.redis_client.ping()
 
             response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
 
             # Получаем информацию о Redis
             if self.is_cluster:
+                # Для кластера используем синхронный вызов
                 info = self.redis_client.info()
             else:
+                # Для обычного Redis используем асинхронный вызов
                 info = await self.redis_client.info()
 
             # Извлекаем нужные метрики
@@ -92,14 +96,25 @@ class HealthService:
             timeout = aiohttp.ClientTimeout(total=5)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 start_time = datetime.utcnow()
-                async with session.get("https://api.telegram.org/bot/getMe") as response:
+                # Используем корректный URL для проверки Telegram API
+                # В тестовом режиме используем базовый URL, так как токен может быть не настроен
+                telegram_url = "https://api.telegram.org/bot/getMe"
+                # Если токен доступен, используем его
+                from config.settings import settings
+                if settings.telegram_token:
+                    telegram_url = f"https://api.telegram.org/bot{settings.telegram_token}/getMe"
+                
+                self.logger.debug(f"Checking Telegram API at: {telegram_url}")
+                async with session.get(telegram_url) as response:
                     response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+                    self.logger.debug(f"Telegram API response: status={response.status}, time={response_time}ms")
                     results["telegram_api"] = {
                         "status": "healthy" if response.status == 200 else "unhealthy",
                         "response_time_ms": response_time,
                         "status_code": response.status
                     }
         except Exception as e:
+            self.logger.error(f"Telegram API check failed: {e}")
             results["telegram_api"] = {
                 "status": "unhealthy",
                 "error": str(e)
@@ -110,14 +125,17 @@ class HealthService:
             timeout = aiohttp.ClientTimeout(total=5)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 start_time = datetime.utcnow()
+                self.logger.debug(f"Checking payment service at: https://api.heleket.com/v1/health")
                 async with session.get("https://api.heleket.com/v1/health") as response:
                     response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+                    self.logger.debug(f"Payment service response: status={response.status}, time={response_time}ms")
                     results["payment_service"] = {
                         "status": "healthy" if response.status == 200 else "unhealthy",
                         "response_time_ms": response_time,
                         "status_code": response.status
                     }
         except Exception as e:
+            self.logger.error(f"Payment service check failed: {e}")
             results["payment_service"] = {
                 "status": "unhealthy",
                 "error": str(e)
