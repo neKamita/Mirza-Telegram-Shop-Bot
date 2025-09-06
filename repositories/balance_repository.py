@@ -3,7 +3,7 @@
 """
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import sessionmaker
@@ -102,7 +102,7 @@ class BalanceRepository:
                 else:
                     raise ValueError(f"Unknown operation: {operation}")
 
-                balance.updated_at = datetime.utcnow()
+                balance.updated_at = datetime.now(timezone.utc)
                 await session.commit()
                 return True
             except Exception as e:
@@ -252,7 +252,7 @@ class BalanceRepository:
                 # Обновляем транзакцию
                 update_stmt = update(Transaction).where(Transaction.id == transaction_id).values(
                     status=status,
-                    updated_at=datetime.utcnow()
+                    updated_at=datetime.now(timezone.utc)
                 )
 
                 if metadata:
@@ -449,7 +449,7 @@ class BalanceRepository:
                             transaction_id,
                             TransactionStatus.CANCELLED,
                             metadata={
-                                "cancelled_at": datetime.utcnow().isoformat(),
+                                "cancelled_at": datetime.now(timezone.utc).isoformat(),
                                 "cancelled_by": "system",
                                 "refund_processed": True
                             }

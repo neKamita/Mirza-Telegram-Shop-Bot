@@ -8,7 +8,7 @@ import hashlib
 import hmac
 import base64
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from core.interfaces import StarPurchaseServiceInterface
 from repositories.user_repository import UserRepository
@@ -124,7 +124,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 metadata={
                     "stars_count": amount,
                     "purchase_type": "balance",
-                    "created_at": datetime.utcnow().isoformat()
+                    "created_at": datetime.now(timezone.utc).isoformat()
                 }
             )
 
@@ -141,7 +141,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 await self.balance_repository.update_transaction_status(
                     transaction_id,
                     TransactionStatus.FAILED,
-                    metadata={"error": "Failed to update balance", "failed_at": datetime.utcnow().isoformat()}
+                    metadata={"error": "Failed to update balance", "failed_at": datetime.now(timezone.utc).isoformat()}
                 )
                 return {
                     "status": "failed",
@@ -153,7 +153,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 transaction_id,
                 TransactionStatus.COMPLETED,
                 metadata={
-                    "completed_at": datetime.utcnow().isoformat(),
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
                     "stars_count": amount,
                     "purchase_type": "balance",
                     "balance_updated": True
@@ -216,7 +216,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 metadata={
                     "stars_count": amount,
                     "purchase_type": "fragment",
-                    "created_at": datetime.utcnow().isoformat()
+                    "created_at": datetime.now(timezone.utc).isoformat()
                 }
             )
 
@@ -235,7 +235,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                         "amount": amount,
                         "transaction_id": transaction_id,
                         "status": "pending",
-                        "created_at": datetime.utcnow().isoformat()
+                        "created_at": datetime.now(timezone.utc).isoformat()
                     }
                 )
 
@@ -268,7 +268,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 await self.balance_repository.update_transaction_status(
                     transaction_id,
                     TransactionStatus.FAILED,
-                    metadata={"error": error_msg, "failed_at": datetime.utcnow().isoformat()}
+                    metadata={"error": error_msg, "failed_at": datetime.now(timezone.utc).isoformat()}
                 )
                 return {
                     "status": "failed",
@@ -281,7 +281,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 transaction_id,
                 TransactionStatus.COMPLETED,
                 metadata={
-                    "purchase_completed_at": datetime.utcnow().isoformat(),
+                    "purchase_completed_at": datetime.now(timezone.utc).isoformat(),
                     "fragment_result": purchase_result.get("result", {}),
                     "purchase_type": "fragment"
                 }
@@ -297,7 +297,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                         "transaction_id": transaction_id,
                         "status": "completed",
                         "fragment_result": purchase_result.get("result", {}),
-                        "completed_at": datetime.utcnow().isoformat()
+                        "completed_at": datetime.now(timezone.utc).isoformat()
                     }
                 )
 
@@ -329,7 +329,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 metadata={
                     "stars_count": amount,
                     "purchase_type": "payment",
-                    "created_at": datetime.utcnow().isoformat()
+                    "created_at": datetime.now(timezone.utc).isoformat()
                 }
             )
 
@@ -348,7 +348,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                         "amount": amount,
                         "transaction_id": transaction_id,
                         "status": "pending",
-                        "created_at": datetime.utcnow().isoformat()
+                        "created_at": datetime.now(timezone.utc).isoformat()
                     }
                 )
 
@@ -361,7 +361,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 await self.balance_repository.update_transaction_status(
                     transaction_id,
                     TransactionStatus.FAILED,
-                    metadata={"error": error_msg, "failed_at": datetime.utcnow().isoformat()}
+                    metadata={"error": error_msg, "failed_at": datetime.now(timezone.utc).isoformat()}
                 )
                 return {
                     "status": "failed",
@@ -373,7 +373,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 await self.balance_repository.update_transaction_status(
                     transaction_id,
                     TransactionStatus.FAILED,
-                    metadata={"error": "Invalid payment response", "failed_at": datetime.utcnow().isoformat()}
+                    metadata={"error": "Invalid payment response", "failed_at": datetime.now(timezone.utc).isoformat()}
                 )
                 return {
                     "status": "failed",
@@ -386,7 +386,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 await self.balance_repository.update_transaction_status(
                     transaction_id,
                     TransactionStatus.FAILED,
-                    metadata={"error": "Incomplete payment data", "failed_at": datetime.utcnow().isoformat()}
+                    metadata={"error": "Incomplete payment data", "failed_at": datetime.now(timezone.utc).isoformat()}
                 )
                 return {
                     "status": "failed",
@@ -401,7 +401,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 metadata={
                     "payment_uuid": result["uuid"],
                     "payment_url": result["url"],
-                    "payment_created_at": datetime.utcnow().isoformat(),
+                    "payment_created_at": datetime.now(timezone.utc).isoformat(),
                     "purchase_type": "payment"
                 }
             )
@@ -417,7 +417,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                         "status": "pending",
                         "payment_uuid": result["uuid"],
                         "payment_url": result["url"],
-                        "created_at": datetime.utcnow().isoformat()
+                        "created_at": datetime.now(timezone.utc).isoformat()
                     }
                 )
 
@@ -464,7 +464,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                         transaction_data["id"],
                         TransactionStatus.COMPLETED,
                         metadata={
-                            "payment_completed_at": datetime.utcnow().isoformat(),
+                            "payment_completed_at": datetime.now(timezone.utc).isoformat(),
                             "payment_amount": payment_info.get("amount"),
                             "payment_currency": payment_info.get("currency", "TON")
                         }
@@ -476,7 +476,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                         TransactionStatus.PENDING,
                         metadata={
                             "payment_status": payment_info.get("status"),
-                            "payment_updated_at": datetime.utcnow().isoformat()
+                            "payment_updated_at": datetime.now(timezone.utc).isoformat()
                         }
                     )
 
@@ -534,7 +534,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                     transaction_id,
                     TransactionStatus.COMPLETED,
                     metadata={
-                        "webhook_received_at": datetime.utcnow().isoformat(),
+                        "webhook_received_at": datetime.now(timezone.utc).isoformat(),
                         "payment_amount": amount,
                         "payment_status": status,
                         "stars_count": transaction_data.get("metadata", {}).get("stars_count", 0)
@@ -553,7 +553,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                     transaction_id,
                     TransactionStatus.FAILED,
                     metadata={
-                        "webhook_received_at": datetime.utcnow().isoformat(),
+                        "webhook_received_at": datetime.now(timezone.utc).isoformat(),
                         "payment_amount": amount,
                         "payment_status": status,
                         "failure_reason": webhook_data.get("error", "Payment failed")
@@ -687,7 +687,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
             from datetime import datetime
             
             # Создаем транзакцию и обновляем баланс параллельно
-            transaction_task = asyncio.create_task(
+            tra, timezonensaction_task = asyncio.create_task(
                 self.balance_repository.create_transaction(
                     user_id=user_id,
                     transaction_type=TransactionType.PURCHASE,
@@ -697,7 +697,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                     metadata={
                         "stars_count": amount,
                         "purchase_type": "balance",
-                        "created_at": datetime.utcnow().isoformat()
+                        "created_at": datetime.now(timezone.utc).isoformat()
                     }
                 )
             )
@@ -730,7 +730,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                         transaction_id,
                         TransactionStatus.COMPLETED,
                         metadata={
-                            "completed_at": datetime.utcnow().isoformat(),
+                            "completed_at": datetime.now(timezone.utc).isoformat(),
                             "stars_count": amount,
                             "purchase_type": "balance",
                             "balance_updated": True
@@ -824,7 +824,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 transaction_data["id"],
                 TransactionStatus.CANCELLED,
                 metadata={
-                    "cancelled_at": datetime.utcnow().isoformat(),
+                    "cancelled_at": datetime.now(timezone.utc).isoformat(),
                     "cancelled_by": "user"
                 }
             )
@@ -875,7 +875,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 transaction_data["id"],
                 TransactionStatus.CANCELLED,
                 metadata={
-                    "cancelled_at": datetime.utcnow().isoformat(),
+                    "cancelled_at": datetime.now(timezone.utc).isoformat(),
                     "cancelled_by": "user_back_button",
                     "reason": "User pressed back button for specific invoice",
                     "payment_uuid": payment_uuid
@@ -912,7 +912,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                     transaction["id"],
                     TransactionStatus.CANCELLED,
                     metadata={
-                        "cancelled_at": datetime.utcnow().isoformat(),
+                        "cancelled_at": datetime.now(timezone.utc).isoformat(),
                         "cancelled_by": "user_back_button",
                         "reason": "User pressed back button"
                     }
@@ -954,7 +954,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 metadata={
                     "recharge_amount": amount,
                     "recharge_type": "heleket",
-                    "created_at": datetime.utcnow().isoformat()
+                    "created_at": datetime.now(timezone.utc).isoformat()
                 }
             )
 
@@ -973,7 +973,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                         "amount": amount,
                         "transaction_id": transaction_id,
                         "status": "pending",
-                        "created_at": datetime.utcnow().isoformat()
+                        "created_at": datetime.now(timezone.utc).isoformat()
                     }
                 )
 
@@ -986,7 +986,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 await self.balance_repository.update_transaction_status(
                     transaction_id,
                     TransactionStatus.FAILED,
-                    metadata={"error": error_msg, "failed_at": datetime.utcnow().isoformat()}
+                    metadata={"error": error_msg, "failed_at": datetime.now(timezone.utc).isoformat()}
                 )
                 return {
                     "status": "failed",
@@ -998,7 +998,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 await self.balance_repository.update_transaction_status(
                     transaction_id,
                     TransactionStatus.FAILED,
-                    metadata={"error": "Invalid payment response", "failed_at": datetime.utcnow().isoformat()}
+                    metadata={"error": "Invalid payment response", "failed_at": datetime.now(timezone.utc).isoformat()}
                 )
                 return {
                     "status": "failed",
@@ -1011,7 +1011,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 await self.balance_repository.update_transaction_status(
                     transaction_id,
                     TransactionStatus.FAILED,
-                    metadata={"error": "Incomplete payment data", "failed_at": datetime.utcnow().isoformat()}
+                    metadata={"error": "Incomplete payment data", "failed_at": datetime.now(timezone.utc).isoformat()}
                 )
                 return {
                     "status": "failed",
@@ -1026,7 +1026,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 metadata={
                     "payment_uuid": result["uuid"],
                     "payment_url": result["url"],
-                    "payment_created_at": datetime.utcnow().isoformat()
+                    "payment_created_at": datetime.now(timezone.utc).isoformat()
                 }
             )
 
@@ -1041,7 +1041,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                         "status": "pending",
                         "payment_uuid": result["uuid"],
                         "payment_url": result["url"],
-                        "created_at": datetime.utcnow().isoformat()
+                        "created_at": datetime.now(timezone.utc).isoformat()
                     }
                 )
 
@@ -1087,7 +1087,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                         transaction_data["id"],
                         TransactionStatus.COMPLETED,
                         metadata={
-                            "payment_completed_at": datetime.utcnow().isoformat(),
+                            "payment_completed_at": datetime.now(timezone.utc).isoformat(),
                             "payment_amount": payment_info.get("amount"),
                             "payment_currency": payment_info.get("currency", "TON")
                         }
@@ -1099,7 +1099,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                         TransactionStatus.PENDING,
                         metadata={
                             "payment_status": payment_info.get("status"),
-                            "payment_updated_at": datetime.utcnow().isoformat()
+                            "payment_updated_at": datetime.now(timezone.utc).isoformat()
                         }
                     )
 
@@ -1197,7 +1197,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                     transaction_id,
                     TransactionStatus.COMPLETED,
                     metadata={
-                        "webhook_received_at": datetime.utcnow().isoformat(),
+                        "webhook_received_at": datetime.now(timezone.utc).isoformat(),
                         "payment_amount": amount,
                         "payment_status": status,
                         "recharge_amount": recharge_amount,
@@ -1217,7 +1217,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                     transaction_id,
                     TransactionStatus.FAILED,
                     metadata={
-                        "webhook_received_at": datetime.utcnow().isoformat(),
+                        "webhook_received_at": datetime.now(timezone.utc).isoformat(),
                         "payment_amount": amount,
                         "payment_status": status,
                         "failure_reason": webhook_data.get("error", "Payment failed")

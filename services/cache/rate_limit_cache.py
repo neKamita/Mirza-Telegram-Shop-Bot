@@ -6,7 +6,7 @@ import logging
 import asyncio
 import time
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import redis.asyncio as redis
 from config.settings import settings
 
@@ -203,7 +203,7 @@ class RateLimitCache:
                 'current_count': count,
                 'limit': limit,
                 'remaining': remaining,
-                'reset_time': datetime.utcnow() + timedelta(seconds=ttl) if ttl > 0 else None,
+                'reset_time': datetime.now(timezone.utc) + timedelta(seconds=ttl) if ttl > 0 else None,
                 'window_seconds': window
             }
 

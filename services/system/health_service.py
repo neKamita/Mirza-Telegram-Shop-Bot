@@ -6,7 +6,7 @@ import aiohttp
 import redis.asyncio as redis
 import logging
 from typing import Dict, Any, List, Optional, Union
-from datetime import datetime
+from datetime import datetime, timezone
 from config.settings import settings
 from redis.cluster import RedisCluster
 
@@ -23,7 +23,7 @@ class HealthService:
     async def check_redis_health(self) -> Dict[str, Any]:
         """Проверка состояния Redis"""
         try:
-            start_time = datetime.utcnow()
+            start_time = datetime.now(timezone.utc)
 
             # Для RedisCluster ping() возвращает bool, для обычного Redis - корутину
             if self.is_cluster:
@@ -33,7 +33,7 @@ class HealthService:
                 # Для обычного Redis используем асинхронный вызов
                 ping_result = await self.redis_client.ping()
 
-            response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+            response_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
             # Получаем информацию о Redis
             if self.is_cluster:
@@ -71,11 +71,11 @@ class HealthService:
             from sqlalchemy import text
 
             engine = create_async_engine(settings.database_url)
-            start_time = datetime.utcnow()
+            start_time = datetime.now(timezone.utc)
 
             async with engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
-                response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+                response_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
             return {
                 "status": "healthy",
@@ -95,7 +95,7 @@ class HealthService:
         try:
             timeout = aiohttp.ClientTimeout(total=5)
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                start_time = datetime.utcnow()
+                start_time = datetime.now(timezone.utc)
                 # Используем корректный URL для проверки Telegram API
                 # В тестовом режиме используем базовый URL, так как токен может быть не настроен
                 telegram_url = "https://api.telegram.org/bot/getMe"
@@ -106,7 +106,7 @@ class HealthService:
                 
                 self.logger.debug(f"Checking Telegram API at: {telegram_url}")
                 async with session.get(telegram_url) as response:
-                    response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+                    response_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
                     self.logger.debug(f"Telegram API response: status={response.status}, time={response_time}ms")
                     results["telegram_api"] = {
                         "status": "healthy" if response.status == 200 else "unhealthy",
@@ -124,10 +124,10 @@ class HealthService:
         try:
             timeout = aiohttp.ClientTimeout(total=5)
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                start_time = datetime.utcnow()
+                start_time = datetime.now(timezone.utc)
                 self.logger.debug(f"Checking payment service at: https://api.heleket.com/v1/health")
                 async with session.get("https://api.heleket.com/v1/health") as response:
-                    response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+                    response_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
                     self.logger.debug(f"Payment service response: status={response.status}, time={response_time}ms")
                     results["payment_service"] = {
                         "status": "healthy" if response.status == 200 else "unhealthy",
@@ -175,7 +175,7 @@ class HealthService:
 
     async def get_health_status(self) -> Dict[str, Any]:
         """Получение полного статуса здоровья системы"""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         # Параллельные проверки
         redis_task = self.check_redis_health()
@@ -203,11 +203,11 @@ class HealthService:
         if unhealthy_services:
             overall_status = "degraded"
 
-        response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+        response_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
         return {
             "status": overall_status,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "response_time_ms": response_time,
             "services": {
                 "redis": redis_health,

@@ -5,7 +5,7 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 
 from services.cache.user_cache import UserCache
@@ -240,7 +240,7 @@ class TestCacheServicesIntegration:
         
         # Симулируем активность пользователя
         user_activity = {
-            "last_action": datetime.utcnow().isoformat(),
+            "last_action": datetime.now(timezone.utc).isoformat(),
             "action_count": 5,
             "purchases_today": 3
         }

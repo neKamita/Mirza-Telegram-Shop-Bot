@@ -3,7 +3,7 @@
 """
 import logging
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from core.interfaces import BalanceServiceInterface
 from repositories.user_repository import UserRepository
@@ -24,41 +24,53 @@ class BalanceService(BalanceServiceInterface):
 
     async def get_user_balance(self, user_id: int) -> Dict[str, Any]:
         """Получение баланса пользователя с использованием Cache-Aside паттерна"""
-        # Сначала пытаемся получить из кеша
-        if self.user_cache:
-            cached_balance = await self.user_cache.get_user_balance(user_id)
-            if cached_balance is not None:
+        try:
+            # Сначала пытаемся получить из кеша
+            if self.user_cache:
+                cached_balance = await self.user_cache.get_user_balance(user_id)
+                if cached_balance is not None:
+                    return {
+                        "user_id": user_id,
+                        "balance": cached_balance,
+                        "currency": "TON",
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "source": "cache"
+                    }
+
+            # Если в кеше нет, получаем из базы данных
+            balance_data = await self.balance_repository.get_user_balance(user_id)
+            if balance_data:
+                # Кешируем результат с увеличенным TTL
+                if self.user_cache:
+                    await self.user_cache.cache_user_balance(user_id, int(balance_data["balance"]))
+
+                balance_data["source"] = "database"
+                return balance_data
+            else:
+                # Если баланса нет, создаем его и сразу кешируем
+                await self.balance_repository.create_user_balance(user_id, 0)
+                
+                # Кешируем нулевой баланс для новых пользователей
+                if self.user_cache:
+                    await self.user_cache.cache_user_balance(user_id, 0)
+                
                 return {
                     "user_id": user_id,
-                    "balance": cached_balance,
+                    "balance": 0,
                     "currency": "TON",
-                    "updated_at": datetime.utcnow().isoformat(),
-                    "source": "cache"
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "source": "database"
                 }
-
-        # Если в кеше нет, получаем из базы данных
-        balance_data = await self.balance_repository.get_user_balance(user_id)
-        if balance_data:
-            # Кешируем результат с увеличенным TTL
-            if self.user_cache:
-                await self.user_cache.cache_user_balance(user_id, int(balance_data["balance"]))
-
-            balance_data["source"] = "database"
-            return balance_data
-        else:
-            # Если баланса нет, создаем его и сразу кешируем
-            await self.balance_repository.create_user_balance(user_id, 0)
-            
-            # Кешируем нулевой баланс для новых пользователей
-            if self.user_cache:
-                await self.user_cache.cache_user_balance(user_id, 0)
-            
+        except Exception as e:
+            self.logger.error(f"Error getting balance for user {user_id}: {e}")
+            # Возвращаем fallback данные при ошибке
             return {
                 "user_id": user_id,
                 "balance": 0,
                 "currency": "TON",
-                "updated_at": datetime.utcnow().isoformat(),
-                "source": "database"
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "source": "fallback",
+                "error": str(e)
             }
 
     async def update_user_balance(self, user_id: int, amount: float, operation: str = "add") -> bool:
@@ -188,7 +200,7 @@ class BalanceService(BalanceServiceInterface):
                 # Завершаем транзакцию
                 return await self.complete_transaction(
                     transaction_id,
-                    metadata={"completed_at": datetime.utcnow().isoformat()}
+                    metadata={"completed_at": datetime.now(timezone.utc).isoformat()}
                 )
 
             return False
@@ -214,7 +226,7 @@ class BalanceService(BalanceServiceInterface):
                 # Завершаем транзакцию
                 return await self.complete_transaction(
                     transaction_id,
-                    metadata={"completed_at": datetime.utcnow().isoformat()}
+                    metadata={"completed_at": datetime.now(timezone.utc).isoformat()}
                 )
 
             return False
@@ -251,7 +263,7 @@ class BalanceService(BalanceServiceInterface):
             from datetime import timedelta
 
             # Вычисляем дату начала периода
-            start_date = datetime.utcnow() - timedelta(days=days)
+            start_date = datetime.now(timezone.utc) - timedelta(days=days)
 
             # Получаем транзакции за период
             transactions = await self.balance_repository.get_user_transactions(
@@ -262,7 +274,7 @@ class BalanceService(BalanceServiceInterface):
             # Фильтруем по дате
             filtered_transactions = [
                 t for t in transactions
-                if t.get("created_at") and datetime.fromisoformat(t["created_at"]) >= start_date
+                if t.get("created_at") and datetime.fromisoformat(t["created_at"].replace('Z', '+00:00')) >= start_date
             ]
 
             # Вычисляем начальный баланс (самая ранняя транзакция)
@@ -331,7 +343,7 @@ class BalanceService(BalanceServiceInterface):
                     metadata={
                         "payment_uuid": payment_uuid,
                         "recharge_type": "heleket",
-                        "processed_at": datetime.utcnow().isoformat()
+                        "processed_at": datetime.now(timezone.utc).isoformat()
                     }
                 )
             else:
@@ -356,7 +368,7 @@ class BalanceService(BalanceServiceInterface):
                     await self.complete_transaction(
                         transaction_id,
                         metadata={
-                            "completed_at": datetime.utcnow().isoformat(),
+                            "completed_at": datetime.now(timezone.utc).isoformat(),
                             "payment_uuid": payment_uuid,
                             "balance_updated": True,
                             "cache_invalidated": True
@@ -369,7 +381,7 @@ class BalanceService(BalanceServiceInterface):
                     await self.fail_transaction(
                         transaction_id,
                         metadata={
-                            "failed_at": datetime.utcnow().isoformat(),
+                            "failed_at": datetime.now(timezone.utc).isoformat(),
                             "error": "Failed to update balance",
                             "payment_uuid": payment_uuid
                         }
@@ -383,7 +395,7 @@ class BalanceService(BalanceServiceInterface):
                 await self.fail_transaction(
                     transaction_id,
                     metadata={
-                        "failed_at": datetime.utcnow().isoformat(),
+                        "failed_at": datetime.now(timezone.utc).isoformat(),
                         "error": f"Processing error: {str(inner_e)}",
                         "payment_uuid": payment_uuid
                     }

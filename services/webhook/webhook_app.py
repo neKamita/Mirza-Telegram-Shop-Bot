@@ -15,7 +15,7 @@ import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, List, Union
 from pathlib import Path
 
@@ -51,7 +51,7 @@ class DomainLoggingMiddleware(BaseHTTPMiddleware):
     """Middleware для расширенного логирования домена nekamita.work"""
 
     async def dispatch(self, request: Request, call_next):
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         # Извлечение информации о домене
         client_host = getattr(request.client, 'host', 'unknown') if request.client else 'unknown'
@@ -96,7 +96,7 @@ class DomainLoggingMiddleware(BaseHTTPMiddleware):
 
         try:
             response = await call_next(request)
-            duration = (datetime.utcnow() - start_time).total_seconds()
+            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 
             # Логирование успешных запросов
             if settings.domain_debug_logging:
@@ -115,7 +115,7 @@ class DomainLoggingMiddleware(BaseHTTPMiddleware):
             return response
 
         except Exception as e:
-            duration = (datetime.utcnow() - start_time).total_seconds()
+            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 
             logger.error(
                 "domain_request_error",
@@ -171,7 +171,7 @@ class SimpleRateLimitMiddleware(BaseHTTPMiddleware):
                 getattr(request.client, 'host', 'unknown') if request.client else 'unknown'
             )
 
-            current_time = datetime.utcnow()
+            current_time = datetime.now(timezone.utc)
             window_start = current_time - timedelta(minutes=1)
 
             # Очистка старых записей
@@ -457,7 +457,7 @@ async def health_check():
             "status": "healthy",
             "service": "webhook-handler",
             "domain": settings.production_domain,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "version": "2.0.0",
             "environment": settings.environment
         }
@@ -484,7 +484,7 @@ async def health_check():
                 "status": "unhealthy",
                 "error": "Внутренняя ошибка сервера",
                 "domain": settings.production_domain,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             },
             status_code=503
         )
@@ -518,7 +518,7 @@ async def detailed_health_check():
             content={
                 "status": "unhealthy",
                 "error": "Внутренняя ошибка сервера",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             },
             status_code=503
         )
@@ -648,7 +648,7 @@ async def root():
                 "webhook": "/webhook/heleket",
                 "docs": "/docs"
             },
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     )
 

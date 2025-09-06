@@ -5,7 +5,7 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 import json
 
@@ -75,7 +75,7 @@ class TestStarPurchaseE2E:
             "status": "success",
             "stars": amount,
             "transaction_id": "frag_tx_123",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
         service.fragment_service.buy_stars_without_kyc.return_value = {
             "status": "success",

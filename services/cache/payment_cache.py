@@ -7,7 +7,7 @@ import time
 import traceback
 import asyncio
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import redis.asyncio as redis
 from threading import Lock
 from config.settings import settings
@@ -96,7 +96,7 @@ class PaymentCache:
         """Кеширование данных инвойса с graceful degradation"""
         try:
             key = f"{self.INVOICE_PREFIX}{invoice_id}"
-            invoice_data['cached_at'] = datetime.utcnow().isoformat()
+            invoice_data['cached_at'] = datetime.now(timezone.utc).isoformat()
 
             # Пытаемся сохранить в Redis
             if self.redis_client:
@@ -156,7 +156,7 @@ class PaymentCache:
                             if cached_at_str:
                                 try:
                                     cached_at = datetime.fromisoformat(cached_at_str)
-                                    current_time = datetime.utcnow()
+                                    current_time = datetime.now(timezone.utc)
                                     time_diff = current_time - cached_at
                                     self.logger.debug(f"Time difference: {time_diff.total_seconds()} seconds, TTL: {self.INVOICE_TTL}")
                                     if time_diff < timedelta(seconds=self.INVOICE_TTL):
@@ -189,7 +189,7 @@ class PaymentCache:
                             if cached_at_str:
                                 try:
                                     cached_at = datetime.fromisoformat(cached_at_str)
-                                    if datetime.utcnow() - cached_at < timedelta(seconds=self.INVOICE_TTL):
+                                    if datetime.now(timezone.utc) - cached_at < timedelta(seconds=self.INVOICE_TTL):
                                         # Удаляем временные поля перед возвратом
                                         data.pop('cached_at', None)
                                         # Кэшируем в локальном хранилище
@@ -241,7 +241,7 @@ class PaymentCache:
             key = f"{self.PAYMENT_STATUS_PREFIX}{payment_id}"
             status_data = {
                 'status': status,
-                'updated_at': datetime.utcnow().isoformat()
+                'updated_at': datetime.now(timezone.utc).isoformat()
             }
 
             if metadata:
@@ -305,7 +305,7 @@ class PaymentCache:
                                 if updated_at_str:
                                     try:
                                         updated_at = datetime.fromisoformat(updated_at_str)
-                                        current_time = datetime.utcnow()
+                                        current_time = datetime.now(timezone.utc)
                                         time_diff = current_time - updated_at
                                         self.logger.debug(f"Time difference: {time_diff.total_seconds()} seconds, TTL: {self.STATUS_TTL}")
                                         if time_diff < timedelta(seconds=self.STATUS_TTL):
@@ -338,7 +338,7 @@ class PaymentCache:
                             if updated_at_str:
                                 try:
                                     updated_at = datetime.fromisoformat(updated_at_str)
-                                    if datetime.utcnow() - updated_at < timedelta(seconds=self.STATUS_TTL):
+                                    if datetime.now(timezone.utc) - updated_at < timedelta(seconds=self.STATUS_TTL):
                                         # Удаляем временные поля перед возвратом
                                         data.pop('updated_at', None)
                                         # Кэшируем в локальном хранилище
@@ -388,7 +388,7 @@ class PaymentCache:
         """Кеширование деталей платежа с graceful degradation"""
         try:
             key = f"{self.PAYMENT_DETAILS_PREFIX}{payment_id}"
-            details['cached_at'] = datetime.utcnow().isoformat()
+            details['cached_at'] = datetime.now(timezone.utc).isoformat()
 
             # Пытаемся сохранить в Redis
             if self.redis_client:
@@ -453,7 +453,7 @@ class PaymentCache:
                                 if cached_at_str:
                                     try:
                                         cached_at = datetime.fromisoformat(cached_at_str)
-                                        current_time = datetime.utcnow()
+                                        current_time = datetime.now(timezone.utc)
                                         time_diff = current_time - cached_at
                                         self.logger.debug(f"Time difference: {time_diff.total_seconds()} seconds, TTL: {self.DEFAULT_TTL}")
                                         if time_diff < timedelta(seconds=self.DEFAULT_TTL):
@@ -486,7 +486,7 @@ class PaymentCache:
                             if cached_at_str:
                                 try:
                                     cached_at = datetime.fromisoformat(cached_at_str)
-                                    if datetime.utcnow() - cached_at < timedelta(seconds=self.DEFAULT_TTL):
+                                    if datetime.now(timezone.utc) - cached_at < timedelta(seconds=self.DEFAULT_TTL):
                                         # Удаляем временные поля перед возвратом
                                         data.pop('cached_at', None)
                                         # Кэшируем в локальном хранилище
@@ -536,7 +536,7 @@ class PaymentCache:
         """Кеширование данных транзакции с graceful degradation"""
         try:
             key = f"{self.PAYMENT_PREFIX}{payment_id}:transaction"
-            transaction_data['cached_at'] = datetime.utcnow().isoformat()
+            transaction_data['cached_at'] = datetime.now(timezone.utc).isoformat()
 
             # Пытаемся сохранить в Redis
             if self.redis_client:
@@ -595,7 +595,7 @@ class PaymentCache:
                                 if cached_at_str:
                                     try:
                                         cached_at = datetime.fromisoformat(cached_at_str)
-                                        current_time = datetime.utcnow()
+                                        current_time = datetime.now(timezone.utc)
                                         time_diff = current_time - cached_at
                                         self.logger.debug(f"Time difference: {time_diff.total_seconds()} seconds, TTL: {self.DEFAULT_TTL}")
                                         if time_diff < timedelta(seconds=self.DEFAULT_TTL):
@@ -628,7 +628,7 @@ class PaymentCache:
                             if cached_at_str:
                                 try:
                                     cached_at = datetime.fromisoformat(cached_at_str)
-                                    if datetime.utcnow() - cached_at < timedelta(seconds=self.DEFAULT_TTL):
+                                    if datetime.now(timezone.utc) - cached_at < timedelta(seconds=self.DEFAULT_TTL):
                                         # Удаляем временные поля перед возвратом
                                         data.pop('cached_at', None)
                                         # Кэшируем в локальном хранилище
@@ -680,7 +680,7 @@ class PaymentCache:
             key = f"{self.PAYMENT_STATUS_PREFIX}{payment_id}"
             status_data = {
                 'status': new_status,
-                'updated_at': datetime.utcnow().isoformat()
+                'updated_at': datetime.now(timezone.utc).isoformat()
             }
 
             if metadata:
@@ -791,7 +791,7 @@ class PaymentCache:
                     # Добавляем в недавние платежи
                     if status_data.get('updated_at'):
                         updated_at = datetime.fromisoformat(status_data['updated_at'])
-                        if datetime.utcnow() - updated_at < timedelta(hours=1):
+                        if datetime.now(timezone.utc) - updated_at < timedelta(hours=1):
                             recent_payments.append({
                                 'payment_id': payment_id,
                                 'status': status,

@@ -7,9 +7,9 @@ import os
 import json
 from pathlib import Path
 from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-# Импортируем FragmentService для типизации
+# Импортируем Fragme, timezonentService для типизации
 from services.fragment.fragment_service import FragmentService
 
 try:
@@ -78,10 +78,13 @@ class FragmentCookieManager:
     async def _save_cookies_to_file(self, cookies: str) -> None:
         """Сохранение cookies в файл"""
         try:
+            # Создаем родительские директории, если они не существуют
+            self.cookies_file.parent.mkdir(parents=True, exist_ok=True)
+            
             data = {
                 'cookies': cookies,
-                'timestamp': datetime.utcnow().isoformat(),
-                'expires_at': (datetime.utcnow() + timedelta(seconds=self.cookie_refresh_interval)).isoformat()
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'expires_at': (datetime.now(timezone.utc) + timedelta(seconds=self.cookie_refresh_interval)).isoformat()
             }
             with open(self.cookies_file, 'w') as f:
                 json.dump(data, f)
@@ -97,7 +100,7 @@ class FragmentCookieManager:
                     expires_at = data.get('expires_at')
                     if expires_at:
                         expires_datetime = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
-                        return datetime.utcnow() >= expires_datetime
+                        return datetime.now(timezone.utc) >= expires_datetime
             return True
         except Exception as e:
             self.logger.error(f"Error checking cookie expiration: {e}")
@@ -176,24 +179,24 @@ class FragmentCookieManager:
     
     async def validate_cookies(self, cookies: str) -> bool:
         """Валидация cookies через тестовый запрос к Fragment API"""
+        # Сохраняем текущие cookies
+        original_cookies = self.fragment_service.fragment_cookies
+        
         try:
-            # Сохраняем текущие cookies
-            original_cookies = self.fragment_service.fragment_cookies
-            
             # Устанавливаем новые cookies для теста
             self.fragment_service.fragment_cookies = cookies
             
             # Пытаемся получить информацию о тестовом пользователе
             result = await self.fragment_service.get_user_info("@fragment")
             
-            # Восстанавливаем оригинальные cookies
-            self.fragment_service.fragment_cookies = original_cookies
-            
             return result["status"] == "success"
             
         except Exception as e:
             self.logger.error(f"Error validating Fragment cookies: {e}")
             return False
+        finally:
+            # Всегда восстанавливаем оригинальные cookies
+            self.fragment_service.fragment_cookies = original_cookies
 
 
 # Функция для интеграции в основное приложение

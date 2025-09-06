@@ -533,7 +533,7 @@ class UserCache:
                             if cached_at_str:
                                 try:
                                     cached_at = datetime.fromisoformat(cached_at_str)
-                                    if datetime.utcnow() - cached_at < timedelta(seconds=self.ACTIVITY_TTL):
+                                    if datetime.now(timezone.utc) - cached_at < timedelta(seconds=self.ACTIVITY_TTL):
                                         # Удаляем временные поля перед возвратом
                                         data.pop('cached_at', None)
                                         # Кэшируем в локальном хранилище

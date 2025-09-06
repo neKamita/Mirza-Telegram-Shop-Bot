@@ -5,7 +5,7 @@ import pytest
 import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from services.cache.payment_cache import PaymentCache, LocalCache
 
 
@@ -176,7 +176,7 @@ class TestPaymentCache:
         """Test getting invoice from Redis successfully"""
         # Mock Redis to return valid data
         redis_data = sample_invoice_data.copy()
-        redis_data['cached_at'] = datetime.utcnow().isoformat()
+        redis_data['cached_at'] = datetime.now(timezone.utc).isoformat()
         serialized_data = json.dumps(redis_data)
         mock_redis.get.return_value = serialized_data
         
@@ -197,7 +197,7 @@ class TestPaymentCache:
         """Test getting expired invoice from Redis"""
         # Mock Redis to return expired data
         expired_data = sample_invoice_data.copy()
-        expired_data['cached_at'] = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+        expired_data['cached_at'] = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         mock_redis.get.return_value = json.dumps(expired_data)
         
         result = await payment_cache.get_invoice("test_invoice")
@@ -244,7 +244,7 @@ class TestPaymentCache:
         """Test getting payment status"""
         status_data = {
             "status": "completed",
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
             "transaction_id": "txn_123"
         }
         mock_redis.get.return_value = json.dumps(status_data)
@@ -268,7 +268,7 @@ class TestPaymentCache:
     async def test_get_payment_details(self, payment_cache, mock_redis, sample_payment_data):
         """Test getting payment details"""
         payment_data = sample_payment_data.copy()
-        payment_data['cached_at'] = datetime.utcnow().isoformat()
+        payment_data['cached_at'] = datetime.now(timezone.utc).isoformat()
         mock_redis.get.return_value = json.dumps(payment_data)
         
         result = await payment_cache.get_payment_details("test_payment")
@@ -326,7 +326,7 @@ class TestPaymentCache:
         with patch.object(payment_cache, 'get_payment_status') as mock_status:
             mock_status.return_value = {
                 "status": "completed",
-                "updated_at": datetime.utcnow().isoformat()
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }
             
             result = await payment_cache.get_payment_stats()
@@ -368,7 +368,7 @@ class TestPaymentCache:
     async def test_get_payment_transaction(self, payment_cache, mock_redis, sample_payment_data):
         """Test getting payment transaction"""
         transaction_data = sample_payment_data.copy()
-        transaction_data['cached_at'] = datetime.utcnow().isoformat()
+        transaction_data['cached_at'] = datetime.now(timezone.utc).isoformat()
         mock_redis.get.return_value = json.dumps(transaction_data)
         
         result = await payment_cache.get_payment_transaction("test_payment")
@@ -577,9 +577,9 @@ class TestPaymentCacheIntegration:
         # Mock Redis operations
         mock_redis.setex.return_value = True
         mock_redis.get.side_effect = [
-            json.dumps({**sample_invoice_data, 'cached_at': datetime.utcnow().isoformat()}),
-            json.dumps({'status': 'pending', 'updated_at': datetime.utcnow().isoformat()}),
-            json.dumps({**sample_payment_data, 'cached_at': datetime.utcnow().isoformat()})
+            json.dumps({**sample_invoice_data, 'cached_at': datetime.now(timezone.utc).isoformat()}),
+            json.dumps({'status': 'pending', 'updated_at': datetime.now(timezone.utc).isoformat()}),
+            json.dumps({**sample_payment_data, 'cached_at': datetime.now(timezone.utc).isoformat()})
         ]
         
         # Cache invoice
@@ -631,7 +631,7 @@ class TestPaymentCacheIntegration:
         mock_redis.setex.return_value = True
         mock_redis.get.return_value = json.dumps({
             'status': 'completed',
-            'updated_at': datetime.utcnow().isoformat()
+            'updated_at': datetime.now(timezone.utc).isoformat()
         })
         
         # Run multiple operations concurrently
