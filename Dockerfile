@@ -1,53 +1,65 @@
-FROM python:3.13-slim
+# Многоступенчатая сборка на Alpine Linux для максимальной скорости
+FROM python:3.13-alpine AS builder
 
 WORKDIR /app
 
-# Установка системных зависимостей
-RUN apt-get update && apt-get install -y \
+# Установка системных зависимостей - СУПЕР БЫСТРО с apk
+RUN apk add --no-cache --virtual .build-deps \
     gcc \
+    musl-dev \
+    libffi-dev \
+    openssl-dev \
     curl \
-    wget \
-    unzip \
-    gnupg \
-    && rm -rf /var/lib/apt/lists/*
+    cargo \
+    && apk add --no-cache \
+    ca-certificates
 
-# Установка Chrome и ChromeDriver для автоматического обновления cookies
-# Используем более надежный подход с установкой через apt
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /etc/apt/trusted.gpg.d/google-archive.gpg && \
-    echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list && \
-    apt-get update && \
-    apt-get install -y google-chrome-stable && \
-    rm -rf /var/lib/apt/lists/*
+# Установка uv для быстрой установки Python зависимостей
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    mv /root/.local/bin/uv /usr/local/bin/uv
 
-# Установка ChromeDriver через pip (более надежный способ)
-RUN pip install --no-cache-dir chromedriver-py
-
-# Копирование requirements и установка зависимостей
+# Установка Python зависимостей
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+    /usr/local/bin/uv pip install --system --compile -r requirements.txt
 
-# Установка Selenium для автоматического обновления cookies (если включено)
-RUN pip install --no-cache-dir selenium
+# Удаляем build dependencies чтобы уменьшить размер
+RUN apk del .build-deps
+
+# Финальный этап - минимальный Alpine образ
+FROM python:3.13-alpine AS runtime
+
+WORKDIR /app
+
+# Копирование установленных пакетов из builder этапа
+COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Установка только runtime зависимостей
+RUN apk add --no-cache \
+    # Для работы с SSL
+    ca-certificates \
+    # Для работы с сетевыми операциями
+    libstdc++
 
 # Копирование кода приложения
 COPY . .
 
-# Создание директорий для логов и ssl
-RUN mkdir -p /app/logs /app/ssl
+# Создание необходимых директорий
+RUN mkdir -p /app/logs
 
 # Установка переменных окружения
-ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
-ENV CHROMEDRIVER_PATH=/usr/local/bin/chromedriver
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONPATH=/app
 
 # Expose ports for webhook service
 EXPOSE 8001
 
-# Health check
+# Оптимизированный HEALTHCHECK
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import asyncio; import sys; sys.path.append('/app'); from repositories.user_repository import UserRepository; import os; repo = UserRepository(os.getenv('DATABASE_URL', '')); asyncio.run(repo.create_tables())" || exit 1
+    CMD python -c "import sys; sys.path.append('/app'); from services.system.health_service import HealthService; import asyncio; asyncio.run(HealthService(None).check_database_health())" || exit 1
 
-# Предварительная проверка настроек Fragment API
-# Запуск скрипта обновления Fragment cookies перед запуском приложения
-# И запуск периодического обновлятора как фоновую задачу
-CMD ["sh", "-c", "python scripts/precheck_fragment.py && python scripts/update_fragment_cookies.py && python scripts/periodic_cookie_refresher.py & python main.py"]
+# Запуск приложения
+CMD ["sh", "-c", "python scripts/precheck_fragment.py & python scripts/update_fragment_cookies.py & python scripts/periodic_cookie_refresher.py & python main.py"]

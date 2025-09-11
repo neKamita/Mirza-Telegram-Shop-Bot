@@ -127,27 +127,33 @@ class FragmentCookieManager:
             chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--window-size=1920,1080")
 
-            # Создаем драйвер с учетом разных способов установки chromedriver
-            driver = None
-            if CHROMEDRIVER_PY_AVAILABLE and binary_path:
-                # Используем chromedriver-py
+            # Используем удаленный Selenium сервер
+            selenium_host = os.getenv("SELENIUM_HOST", "selenium-chrome")
+            selenium_port = os.getenv("SELENIUM_PORT", "4444")
+            selenium_url = f"http://{selenium_host}:{selenium_port}/wd/hub"
+            
+            try:
+                # Удаленный драйвер с headless режимом
+                driver = webdriver.Remote(
+                    command_executor=selenium_url,
+                    options=chrome_options
+                )
+                self.logger.info(f"Connected to remote Selenium server at {selenium_url}")
+            except Exception as e:
+                self.logger.error(f"Failed to connect to remote Selenium server: {e}")
+                # Fallback: попытка использовать локальный chromedriver если удаленный недоступен
                 try:
-                    service = ChromeService(executable_path=binary_path)
-                    driver = webdriver.Chrome(service=service, options=chrome_options)
-                except Exception as e:
-                    self.logger.warning(f"Failed to create driver with chromedriver-py: {e}")
-            else:
-                # Используем системный chromedriver
-                driver_path = os.getenv("CHROMEDRIVER_PATH", "/usr/local/bin/chromedriver")
-                try:
-                    service = ChromeService(executable_path=driver_path)
-                    driver = webdriver.Chrome(service=service, options=chrome_options)
-                except Exception as e:
-                    self.logger.warning(f"Failed to create driver with system chromedriver: {e}")
-
-            if driver is None:
-                self.logger.error("Failed to create Chrome driver")
-                return None
+                    if CHROMEDRIVER_PY_AVAILABLE and binary_path:
+                        service = ChromeService(executable_path=binary_path)
+                        driver = webdriver.Chrome(service=service, options=chrome_options)
+                    else:
+                        driver_path = os.getenv("CHROMEDRIVER_PATH", "/usr/local/bin/chromedriver")
+                        service = ChromeService(executable_path=driver_path)
+                        driver = webdriver.Chrome(service=service, options=chrome_options)
+                    self.logger.warning("Using local Chrome driver as fallback")
+                except Exception as fallback_error:
+                    self.logger.error(f"Failed to create local Chrome driver: {fallback_error}")
+                    return None
 
             try:
                 # Переходим на страницу Fragment

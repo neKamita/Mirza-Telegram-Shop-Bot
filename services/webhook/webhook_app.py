@@ -417,9 +417,9 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://nekamita.work",
-        "https://www.nekamita.work",
-        "https://api.nekamita.work"
+        "https://neKamita.work",
+        "https://www.neKamita.work",
+        "https://api.neKamita.work"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
@@ -431,9 +431,9 @@ app.add_middleware(
 app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=[
-        "nekamita.work",
-        "www.nekamita.work",
-        "api.nekamita.work",
+        "neKamita.work",
+        "www.neKamita.work",
+        "api.neKamita.work",
         "localhost",
         "127.0.0.1",
         "0.0.0.0",

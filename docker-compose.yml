@@ -15,7 +15,7 @@ services:
       - API_KEY=${API_KEY}
       - SSL_CERT_PATH=${SSL_CERT_PATH}
       - SSL_KEY_PATH=${SSL_KEY_PATH}
-      - WEBHOOK_ENABLED=${WEBHOOK_ENABLED}
+      - WEBHOOK_ENABLED=False # Отключаем webhook в основном боте, так как есть отдельный сервис
       - WEBHOOK_HOST=${WEBHOOK_HOST}
       - WEBHOOK_PORT=${WEBHOOK_PORT}
       - WEBHOOK_PATH=${WEBHOOK_PATH}
@@ -28,6 +28,8 @@ services:
       - FRAGMENT_COOKIES=${FRAGMENT_COOKIES}
       - FRAGMENT_AUTO_COOKIE_REFRESH=${FRAGMENT_AUTO_COOKIE_REFRESH}
       - FRAGMENT_COOKIE_REFRESH_INTERVAL=${FRAGMENT_COOKIE_REFRESH_INTERVAL}
+      - SELENIUM_HOST=selenium-chrome
+      - SELENIUM_PORT=4444
 
     depends_on:
       db:
@@ -36,8 +38,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./logs:/app/logs
-      - ${SSL_CERT_PATH}:/app/ssl/cert.pem
-      - ${SSL_KEY_PATH}:/app/ssl/key.pem
+      - ./nginx/ssl:/etc/nginx/ssl
     networks:
       - bot-network
       - redis-cluster
@@ -301,7 +302,7 @@ services:
       - REDIS_URL=${REDIS_URL}
       - REDIS_CLUSTER_URL=${REDIS_CLUSTER_URL}
       - REDIS_CLUSTER_ENABLED=${REDIS_CLUSTER_ENABLED}
-      - REDIS_CLUSTER_NODES=${REDIS_CLUSTER_NODES}
+      - REDIS_CLUSTER_NODes=${REDIS_CLUSTER_NODES}
       - REDIS_PASSWORD=${REDIS_PASSWORD}
       - MERCHANT_UUID=${MERCHANT_UUID}
       - API_KEY=${API_KEY}
@@ -316,6 +317,8 @@ services:
       - FRAGMENT_COOKIES=${FRAGMENT_COOKIES}
       - FRAGMENT_AUTO_COOKIE_REFRESH=${FRAGMENT_AUTO_COOKIE_REFRESH}
       - FRAGMENT_COOKIE_REFRESH_INTERVAL=${FRAGMENT_COOKIE_REFRESH_INTERVAL}
+      - SELENIUM_HOST=selenium-chrome
+      - SELENIUM_PORT=4444
     depends_on:
       db:
         condition: service_started
@@ -327,10 +330,17 @@ services:
       - bot-network
       - redis-cluster
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=5).read()",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
 
   # Enhanced Nginx with SSL and WebSocket support
   nginx:
@@ -344,9 +354,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
       - ./nginx/conf.d:/etc/nginx/conf.d
-      - ./ssl/cert.pem:/app/cert.pem
-      - ./ssl/key.pem:/app/key.pem
-      - ./ssl/chain.pem:/app/chain.pem
+      - ./nginx/ssl:/etc/nginx/ssl
     depends_on:
       - app
     networks:
@@ -401,10 +409,33 @@ services:
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD", "sh", "-c", "pgrep -f 'redis-cluster-monitor' >/dev/null"]
+      test: ["CMD", "sh", "-c", "pgrep -f monitor_cluster_new || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+  # Selenium Chrome для работы с Fragment API
+  selenium-chrome:
+    image: selenium/standalone-chrome:latest
+    container_name: telegram-selenium-chrome
+    restart: unless-stopped
+    environment:
+      - SE_NODE_SESSION_TIMEOUT=300
+      - SE_NODE_MAX_SESSIONS=5
+      - SE_NODE_OVERRIDE_MAX_SESSIONS=true
+    shm_size: "2gb"
+    ports:
+      - "4444:4444"
+      - "7900:7900"
+    networks:
+      - bot-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: telegram-cloudflared
@@ -419,27 +450,30 @@ services:
       ]
     environment:
       - CLOUDFLARED_LOG_FILE=/var/log/cloudflared/cloudflared.log
+      - TUNNEL_ORIGIN_CERT=/etc/cloudflared/cert.pem
+      - TUNNEL_DNS_UPSTREAM=https://1.1.1.1/dns-query,https://8.8.8.8/dns-query,https://9.9.9.9/dns-query
     volumes:
       - ./cloudflare/cloudflared.json:/etc/cloudflared/config.json:ro
       - ./cloudflare/cloudflared-credentials.json:/etc/cloudflared/credentials.json:ro
-      - ./cloudflare/cloudflared-cert.pem:/etc/cloudflared/cert.pem:ro
+      - ./nginx/ssl/cert.pem:/etc/cloudflared/cert.pem:ro
       - cloudflared_data:/root/.cloudflared
       - cloudflared_logs:/var/log/cloudflared
     networks:
       - bot-network
+      - redis-cluster
     depends_on:
+      nginx:
+        condition: service_healthy
       webhook:
         condition: service_healthy
+      selenium-chrome:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "cloudflared", "tunnel", "info", "telegram-bot-tunnel"]
+      test: ["CMD", "cloudflared", "tunnel", "info"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
-      - 127.0.0.11
+      start_period: 60s
 
 volumes:
   redis_node_1_data:

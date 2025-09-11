@@ -237,8 +237,8 @@ REDIS_CLUSTER_ENABLED=false
 REDIS_PASSWORD=your_redis_password
 
 # SSL (самоподписанный для разработки)
-SSL_CERT_PATH=./ssl/cert.pem
-SSL_KEY_PATH=./ssl/key.pem
+SSL_CERT_PATH=./nginx/ssl/cert.pem
+SSL_KEY_PATH=./nginx/ssl/key.pem
 
 # Fragment API (опционально)
 FRAGMENT_SEED_PHRASE=your_seed_phrase
@@ -335,8 +335,8 @@ REDIS_CLUSTER_NODES=redis-node-1:7379,redis-node-2:7380,redis-node-3:7381
 REDIS_PASSWORD=secure_redis_password_here
 
 # SSL Certificates
-SSL_CERT_PATH=/app/ssl/cert.pem
-SSL_KEY_PATH=/app/ssl/key.pem
+SSL_CERT_PATH=/etc/nginx/ssl/cert.pem
+SSL_KEY_PATH=/etc/nginx/ssl/key.pem
 
 # Cloudflare Tunnel
 CLOUDFLARE_TUNNEL_TOKEN=your_tunnel_token
