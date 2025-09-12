@@ -8,7 +8,7 @@ from sqlalchemy import select, insert, update
 from typing import Dict, Any, Optional, cast
 from core.interfaces import DatabaseInterface
 from sqlalchemy import Column, Integer, Boolean, DateTime, String, Numeric, ForeignKey, Enum
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from datetime import datetime
 from enum import Enum as PyEnum

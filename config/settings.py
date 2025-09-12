@@ -190,6 +190,10 @@ class Settings:
         # Support Configuration
         self.support_contact: str = os.getenv("SUPPORT_CONTACT", "@Mirza")
 
+        # Alerting Configuration
+        self.telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
+        self.telegram_alerts_enabled: bool = os.getenv("TELEGRAM_ALERTS_ENABLED", "False").lower() == "true"
+
 
 # Глобальный экземпляр настроек
 settings = Settings()

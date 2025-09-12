@@ -43,11 +43,17 @@ services:
       - bot-network
       - redis-cluster
     healthcheck:
-      test: ["CMD", "python", "-c", "import os; print('App healthy')"]
-      interval: 5s
-      timeout: 3s
-      retries: 2
-      start_period: 10s
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import socket; socket.create_connection(('localhost', 8000), timeout=2); print('App healthy')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   # Database service
   db:
@@ -97,12 +103,12 @@ services:
           "CMD",
           "sh",
           "-c",
-          "redis-cli -p 7379 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
+          "redis-cli -p 7379 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1 && redis-cli -p 7379 -a ${REDIS_PASSWORD} cluster info | grep -q 'cluster_state:ok'",
         ]
-      interval: 3s
-      timeout: 2s
+      interval: 5s
+      timeout: 3s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
   redis-node-2:
     image: redis:7-bullseye
@@ -130,12 +136,12 @@ services:
           "CMD",
           "sh",
           "-c",
-          "redis-cli -p 7380 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
+          "redis-cli -p 7380 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1 && redis-cli -p 7380 -a ${REDIS_PASSWORD} cluster info | grep -q 'cluster_state:ok'",
         ]
-      interval: 3s
-      timeout: 2s
+      interval: 5s
+      timeout: 3s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
   redis-node-3:
     image: redis:7-bullseye
@@ -163,12 +169,12 @@ services:
           "CMD",
           "sh",
           "-c",
-          "redis-cli -p 7381 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
+          "redis-cli -p 7381 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1 && redis-cli -p 7381 -a ${REDIS_PASSWORD} cluster info | grep -q 'cluster_state:ok'",
         ]
-      interval: 3s
-      timeout: 2s
+      interval: 5s
+      timeout: 3s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
   # Redis Replicas
   redis-replica-1:
@@ -200,12 +206,12 @@ services:
           "CMD",
           "sh",
           "-c",
-          "redis-cli -p 7382 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
+          "redis-cli -p 7382 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1 && redis-cli -p 7382 -a ${REDIS_PASSWORD} cluster info | grep -q 'cluster_state:ok'",
         ]
-      interval: 3s
-      timeout: 2s
+      interval: 5s
+      timeout: 3s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
   redis-replica-2:
     image: redis:7-bullseye
@@ -236,12 +242,12 @@ services:
           "CMD",
           "sh",
           "-c",
-          "redis-cli -p 7383 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
+          "redis-cli -p 7383 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1 && redis-cli -p 7383 -a ${REDIS_PASSWORD} cluster info | grep -q 'cluster_state:ok'",
         ]
-      interval: 3s
-      timeout: 2s
+      interval: 5s
+      timeout: 3s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
   redis-replica-3:
     image: redis:7-bullseye
@@ -272,12 +278,12 @@ services:
           "CMD",
           "sh",
           "-c",
-          "redis-cli -p 7384 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1",
+          "redis-cli -p 7384 -a ${REDIS_PASSWORD} ping >/dev/null 2>&1 && redis-cli -p 7384 -a ${REDIS_PASSWORD} cluster info | grep -q 'cluster_state:ok'",
         ]
-      interval: 3s
-      timeout: 2s
+      interval: 5s
+      timeout: 3s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
   # Webhook service for balance and payment processing
   webhook:
@@ -361,9 +367,10 @@ services:
       - bot-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-      interval: 30s
-      timeout: 10s
+      interval: 15s
+      timeout: 5s
       retries: 3
+      start_period: 20s
 
   # Redis Cluster creation using redis-cli --cluster
   redis-cluster-creator:
@@ -431,10 +438,10 @@ services:
       - bot-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
-      interval: 30s
-      timeout: 10s
+      interval: 20s
+      timeout: 8s
       retries: 3
-      start_period: 30s
+      start_period: 40s
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -469,11 +476,17 @@ services:
       selenium-chrome:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "cloudflared", "tunnel", "info"]
-      interval: 30s
-      timeout: 10s
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "cloudflared tunnel info | grep -q 'active' && curl -f http://localhost:8080/health",
+        ]
+      interval: 15s
+      timeout: 8s
       retries: 3
-      start_period: 60s
+      start_period: 45s
 
 volumes:
   redis_node_1_data:

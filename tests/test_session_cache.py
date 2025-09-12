@@ -892,65 +892,64 @@ class TestSessionCacheComprehensive:
             assert close_called is True
 
     @pytest.mark.asyncio
-    async def test_redis_client_initialization_without_provided_client(self, mocker):
+    async def test_redis_client_initialization_without_provided_client(self, monkeypatch):
         """Тест инициализации Redis клиента когда клиент не предоставлен"""
         # Мокируем настройки
-        mocker.patch('config.settings.settings.is_redis_cluster', False)
-        mocker.patch('config.settings.settings.redis_url', 'redis://localhost:6379')
-        mocker.patch('config.settings.settings.redis_password', None)
-        mocker.patch('config.settings.settings.redis_db', 0)
-        mocker.patch('config.settings.settings.redis_socket_timeout', 5)
-        mocker.patch('config.settings.settings.redis_socket_connect_timeout', 5)
-        mocker.patch('config.settings.settings.redis_retry_on_timeout', True)
-        mocker.patch('config.settings.settings.redis_max_connections', 10)
-        mocker.patch('config.settings.settings.redis_health_check_interval', 30)
-        
+        monkeypatch.setattr('config.settings.settings.is_redis_cluster', False)
+        monkeypatch.setattr('config.settings.settings.redis_url', 'redis://localhost:6379')
+        monkeypatch.setattr('config.settings.settings.redis_password', None)
+        monkeypatch.setattr('config.settings.settings.redis_db', 0)
+        monkeypatch.setattr('config.settings.settings.redis_socket_timeout', 5)
+        monkeypatch.setattr('config.settings.settings.redis_socket_connect_timeout', 5)
+        monkeypatch.setattr('config.settings.settings.redis_retry_on_timeout', True)
+        monkeypatch.setattr('config.settings.settings.redis_max_connections', 10)
+        monkeypatch.setattr('config.settings.settings.redis_health_check_interval', 30)
+
         # Мокируем создание Redis клиента чтобы избежать реальных соединений
-        mock_redis = mocker.patch('redis.asyncio.Redis')
-        mock_instance = mocker.AsyncMock()
-        mock_redis.return_value = mock_instance
+        mock_instance = AsyncMock()
         mock_instance.ping.return_value = True
         
-        # Мокируем _setup_redis_client чтобы избежать проблем с event loop
-        setup_mock = mocker.patch.object(SessionCache, '_setup_redis_client')
-        
-        # Создаем SessionCache без предоставления redis_client
-        session_cache = SessionCache(redis_client=None)
-        
-        # Проверяем что конструктор работает без ошибок
-        assert hasattr(session_cache, 'redis_healthy')
-        # _setup_redis_client должен был быть вызван минимум один раз (может быть больше из-за логики восстановления)
-        assert setup_mock.call_count >= 1
+        from unittest.mock import patch
+        with patch('redis.asyncio.Redis', return_value=mock_instance):
+            with patch.object(SessionCache, '_setup_redis_client') as setup_mock:
+                # Создаем SessionCache без предоставления redis_client
+                session_cache = SessionCache(redis_client=None)
+
+                # Проверяем что конструктор работает без ошибок
+                assert hasattr(session_cache, 'redis_healthy')
+                # _setup_redis_client должен был быть вызван минимум один раз (может быть больше из-за логики восстановления)
+                assert setup_mock.call_count >= 1
 
     @pytest.mark.asyncio
-    async def test_redis_client_initialization_failure(self, mocker):
+    async def test_redis_client_initialization_failure(self, monkeypatch):
         """Тест обработки ошибки инициализации Redis клиента"""
         # Мокируем настройки
-        mocker.patch('config.settings.settings.is_redis_cluster', False)
-        mocker.patch('config.settings.settings.redis_url', 'redis://localhost:6379')
+        monkeypatch.setattr('config.settings.settings.is_redis_cluster', False)
+        monkeypatch.setattr('config.settings.settings.redis_url', 'redis://localhost:6379')
         
+        from unittest.mock import patch
         # Мокируем создание Redis клиента чтобы вызвать исключение
-        mocker.patch('redis.asyncio.Redis', side_effect=ConnectionError("Ошибка соединения"))
-        
-        # Создаем SessionCache без предоставления redis_client
-        session_cache = SessionCache(redis_client=None)
-        
-        # Проверяем что конструктор работает без ошибок даже при ошибке инициализации
+        with patch('redis.asyncio.Redis', side_effect=ConnectionError("Ошибка соединения")):
+            # Создаем SessionCache без предоставления redis_client
+            session_cache = SessionCache(redis_client=None)
+            
+            # Проверяем что конструктор работает без ошибок даже при ошибке инициализации
         assert hasattr(session_cache, 'redis_healthy')
         # Важно, что конструктор не падает с исключением при ошибке инициализации Redis
 
     @pytest.mark.asyncio
-    async def test_sync_redis_operations(self, session_cache, mocker):
+    async def test_sync_redis_operations(self, session_cache):
         """Тест Redis операций с синхронным Redis клиентом"""
+        from unittest.mock import Mock
         # Создаем мок синхронного Redis клиента
-        mock_redis = mocker.Mock()
+        mock_redis = Mock()
         mock_redis.ping.return_value = True
         mock_redis.get.return_value = json.dumps({'test': 'data'})
         mock_redis.setex.return_value = True
         mock_redis.delete.return_value = 1
         
         # Делаем метод ping синхронным (не async)
-        mock_redis.ping = mocker.Mock(return_value=True)
+        mock_redis.ping = Mock(return_value=True)
         
         # Создаем SessionCache с синхронным Redis клиентом
         session_cache = SessionCache(redis_client=mock_redis)
@@ -999,7 +998,7 @@ class TestSessionCacheComprehensive:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_initialize_and_cleanup_methods(self, session_cache, mocker):
+    async def test_initialize_and_cleanup_methods(self, session_cache):
         """Тест методов initialize и cleanup"""
         # Тест метода initialize
         await session_cache.initialize()

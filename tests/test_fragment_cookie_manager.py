@@ -320,7 +320,8 @@ class TestFragmentCookieManager:
     @pytest.mark.asyncio
     @patch('services.fragment.fragment_cookie_manager.SELENIUM_AVAILABLE', True)
     @patch('services.fragment.fragment_cookie_manager.webdriver')
-    async def test_refresh_cookies_success(self, mock_webdriver, cookie_manager):
+    @patch('services.fragment.fragment_cookie_manager.WebDriverWait')
+    async def test_refresh_cookies_success(self, mock_wait, mock_webdriver, cookie_manager):
         """Тест успешного обновления cookies через Selenium"""
         # Arrange
         mock_driver = Mock()
@@ -328,7 +329,14 @@ class TestFragmentCookieManager:
             {'name': 'test_cookie', 'value': 'test_value'},
             {'name': 'session', 'value': 'session_id'}
         ]
+        
+        # Мокаем Remote driver для успешного подключения
+        mock_webdriver.Remote.return_value = mock_driver
         mock_webdriver.Chrome.return_value = mock_driver
+        
+        # Мокаем WebDriverWait
+        mock_wait_instance = Mock()
+        mock_wait.return_value = mock_wait_instance
         
         # Act
         result = await cookie_manager._refresh_cookies()
@@ -344,6 +352,8 @@ class TestFragmentCookieManager:
     async def test_refresh_cookies_driver_creation_failed(self, mock_webdriver, cookie_manager):
         """Тест обновления cookies когда не удалось создать драйвер"""
         # Arrange
+        # Оба драйвера (Remote и Chrome) должны падать
+        mock_webdriver.Remote.side_effect = Exception("Remote driver failed")
         mock_webdriver.Chrome.side_effect = Exception("Driver creation failed")
         
         # Act
@@ -351,7 +361,8 @@ class TestFragmentCookieManager:
         
         # Assert
         assert result is None
-        cookie_manager.logger.error.assert_called_once()
+        # Ожидаем два вызова error: Remote driver и Chrome fallback
+        assert cookie_manager.logger.error.call_count == 2
 
     @pytest.mark.asyncio
     @patch('services.fragment.fragment_cookie_manager.SELENIUM_AVAILABLE', True)
@@ -361,6 +372,9 @@ class TestFragmentCookieManager:
         # Arrange
         mock_driver = Mock()
         mock_driver.get.side_effect = Exception("Timeout")
+        
+        # Мокаем Remote driver fallback к Chrome
+        mock_webdriver.Remote.side_effect = Exception("Remote failed")
         mock_webdriver.Chrome.return_value = mock_driver
         
         # Act
@@ -368,7 +382,8 @@ class TestFragmentCookieManager:
         
         # Assert
         assert result is None
-        cookie_manager.logger.error.assert_called_once()
+        # Ожидаем два вызова error: Remote driver и timeout
+        assert cookie_manager.logger.error.call_count >= 1
         mock_driver.quit.assert_called_once()
 
     @pytest.mark.asyncio

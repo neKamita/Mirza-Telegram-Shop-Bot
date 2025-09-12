@@ -687,7 +687,7 @@ class StarPurchaseService(StarPurchaseServiceInterface):
             from datetime import datetime
             
             # Создаем транзакцию и обновляем баланс параллельно
-            tra, timezonensaction_task = asyncio.create_task(
+            transaction_task = asyncio.create_task(
                 self.balance_repository.create_transaction(
                     user_id=user_id,
                     transaction_type=TransactionType.PURCHASE,

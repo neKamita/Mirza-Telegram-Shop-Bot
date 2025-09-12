@@ -3,12 +3,14 @@
 """
 import logging
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable
 
 from fragment_api_lib.client import FragmentAPIClient
 from fragment_api_lib.models import *
 
 from config.settings import settings
+from services.system.circuit_breaker import circuit_manager, CircuitConfigs
+from utils.retry_utils import async_retry, RetryConfigs, RetryError
 
 
 class FragmentService:
@@ -24,6 +26,12 @@ class FragmentService:
         
         # Инициализируем менеджер cookies позже, когда он будет нужен
         self._cookie_manager = None
+        
+        # Инициализация circuit breaker для Fragment API
+        self.circuit_breaker = circuit_manager.create_circuit(
+            "fragment_service",
+            CircuitConfigs.fragment_service()
+        )
         
         # Проверяем формат seed phrase
         self._validate_seed_phrase()
@@ -98,224 +106,182 @@ class FragmentService:
             self.logger.error(f"Error refreshing Fragment cookies: {e}")
             return False
 
+    @async_retry(RetryConfigs.fragment_service())
     async def _make_api_call(self, api_method, *args, **kwargs) -> Dict[str, Any]:
         """
         Обертка для API вызовов с автоматическим обновлением cookies
+        Использует circuit breaker и retry механизм
         """
-        # Сначала пытаемся выполнить вызов с текущими cookies
-        try:
-            result = api_method(*args, **kwargs)
-            return {
-                "status": "success",
-                "result": result
-            }
-        except Exception as e:
-            # Если ошибка связана с cookies, пытаемся обновить их
-            error_str = str(e).lower()
-            if "cookie" in error_str or "auth" in error_str or "unauthorized" in error_str:
-                self.logger.warning(f"API call failed with auth error: {e}, trying to refresh cookies")
-                
-                # Обновляем cookies
-                if await self.refresh_cookies_if_needed():
-                    # Повторяем вызов с новыми cookies
-                    try:
-                        result = api_method(*args, **kwargs)
-                        return {
-                            "status": "success",
-                            "result": result
-                        }
-                    except Exception as retry_error:
-                        self.logger.error(f"API call failed after cookie refresh: {retry_error}")
+        async def _execute_with_circuit_breaker():
+            # Сначала пытаемся выполнить вызов с текущими cookies
+            try:
+                result = api_method(*args, **kwargs)
+                return {
+                    "status": "success",
+                    "result": result
+                }
+            except Exception as e:
+                # Если ошибка связана с cookies, пытаемся обновить их
+                error_str = str(e).lower()
+                if "cookie" in error_str or "auth" in error_str or "unauthorized" in error_str:
+                    self.logger.warning(f"API call failed with auth error: {e}, trying to refresh cookies")
+                    
+                    # Обновляем cookies
+                    if await self.refresh_cookies_if_needed():
+                        # Повторяем вызов с новыми cookies
+                        try:
+                            result = api_method(*args, **kwargs)
+                            return {
+                                "status": "success",
+                                "result": result
+                            }
+                        except Exception as retry_error:
+                            self.logger.error(f"API call failed after cookie refresh: {retry_error}")
+                            return {
+                                "status": "failed",
+                                "error": str(retry_error)
+                            }
+                    else:
                         return {
                             "status": "failed",
-                            "error": str(retry_error)
+                            "error": "Failed to refresh cookies"
                         }
                 else:
+                    # Другая ошибка, не связанная с cookies
+                    self.logger.error(f"API call failed: {e}")
                     return {
                         "status": "failed",
-                        "error": "Failed to refresh cookies"
+                        "error": str(e)
                     }
-            else:
-                # Другая ошибка, не связанная с cookies
-                self.logger.error(f"API call failed: {e}")
-                return {
-                    "status": "failed",
-                    "error": str(e)
-                }
+
+        # Используем circuit breaker для выполнения вызова
+        try:
+            result = await self.circuit_breaker.call(_execute_with_circuit_breaker)
+            return result
+        except Exception as e:
+            self.logger.error(f"Circuit breaker failed for API call: {e}")
+            return {
+                "status": "failed",
+                "error": f"Circuit breaker error: {str(e)}"
+            }
 
 
     async def ping(self) -> Dict[str, Any]:
         """Пинг API"""
-        try:
-            result = self.client.ping()
-            return {
-                "status": "success",
-                "result": result
-            }
-        except Exception as e:
-            self.logger.error(f"Error pinging Fragment API: {e}")
-            return {
-                "status": "failed",
-                "error": str(e)
-            }
+        # Используем новый механизм с circuit breaker и retry
+        return await self._make_api_call(
+            lambda: self.client.ping()
+        )
 
     async def get_balance(self) -> Dict[str, Any]:
         """Получение баланса кошелька"""
-        try:
-            if not self.seed_phrase:
-                return {
-                    "status": "failed",
-                    "error": "Seed phrase is not configured"
-                }
-                
-            result = self.client.get_balance(seed=self.seed_phrase)
-            return {
-                "status": "success",
-                "result": result
-            }
-        except Exception as e:
-            self.logger.error(f"Error getting balance from Fragment API: {e}")
+        if not self.seed_phrase:
             return {
                 "status": "failed",
-                "error": str(e)
+                "error": "Seed phrase is not configured"
             }
+            
+        # Используем новый механизм с circuit breaker и retry
+        return await self._make_api_call(
+            lambda: self.client.get_balance(seed=self.seed_phrase)
+        )
 
     async def get_user_info(self, username: str) -> Dict[str, Any]:
         """Получение информации о пользователе"""
-        try:
-            if not self.fragment_cookies:
-                return {
-                    "status": "failed",
-                    "error": "Fragment cookies are not configured"
-                }
-                
-            result = self.client.get_user_info(
+        if not self.fragment_cookies:
+            return {
+                "status": "failed",
+                "error": "Fragment cookies are not configured"
+            }
+            
+        # Используем новый механизм с circuit breaker и retry
+        return await self._make_api_call(
+            lambda: self.client.get_user_info(
                 username=username,
                 fragment_cookies=self.fragment_cookies
             )
-            return {
-                "status": "success",
-                "result": result
-            }
-        except Exception as e:
-            self.logger.error(f"Error getting user info from Fragment API for {username}: {e}")
-            return {
-                "status": "failed",
-                "error": str(e)
-            }
+        )
 
     async def buy_stars_without_kyc(self, username: str, amount: int) -> Dict[str, Any]:
         """Покупка звезд без KYC"""
-        try:
-            if not self.seed_phrase:
-                return {
-                    "status": "failed",
-                    "error": "Seed phrase is not configured"
-                }
-                
-            result = self.client.buy_stars_without_kyc(
+        if not self.seed_phrase:
+            return {
+                "status": "failed",
+                "error": "Seed phrase is not configured"
+            }
+            
+        # Используем новый механизм с circuit breaker и retry
+        return await self._make_api_call(
+            lambda: self.client.buy_stars_without_kyc(
                 username=username,
                 amount=amount,
                 seed=self.seed_phrase
             )
-            return {
-                "status": "success",
-                "result": result
-            }
-        except Exception as e:
-            self.logger.error(f"Error buying stars without KYC from Fragment API for {username}: {e}")
-            return {
-                "status": "failed",
-                "error": str(e)
-            }
+        )
 
     async def buy_stars(self, username: str, amount: int, show_sender: bool = False) -> Dict[str, Any]:
         """Покупка звезд (с KYC)"""
-        try:
-            if not self.seed_phrase:
-                return {
-                    "status": "failed",
-                    "error": "Seed phrase is not configured"
-                }
-                
-            if not self.fragment_cookies:
-                return {
-                    "status": "failed",
-                    "error": "Fragment cookies are not configured"
-                }
-                
-            result = self.client.buy_stars(
+        if not self.seed_phrase:
+            return {
+                "status": "failed",
+                "error": "Seed phrase is not configured"
+            }
+            
+        if not self.fragment_cookies:
+            return {
+                "status": "failed",
+                "error": "Fragment cookies are not configured"
+            }
+            
+        # Используем новый механизм с circuit breaker и retry
+        return await self._make_api_call(
+            lambda: self.client.buy_stars(
                 username=username,
                 amount=amount,
                 show_sender=show_sender,
                 fragment_cookies=self.fragment_cookies,
                 seed=self.seed_phrase
             )
-            return {
-                "status": "success",
-                "result": result
-            }
-        except Exception as e:
-            self.logger.error(f"Error buying stars from Fragment API for {username}: {e}")
-            return {
-                "status": "failed",
-                "error": str(e)
-            }
+        )
 
     async def buy_premium_without_kyc(self, username: str, duration: int) -> Dict[str, Any]:
         """Покупка Telegram Premium без KYC"""
-        try:
-            if not self.seed_phrase:
-                return {
-                    "status": "failed",
-                    "error": "Seed phrase is not configured"
-                }
-                
-            result = self.client.buy_premium_without_kyc(
+        if not self.seed_phrase:
+            return {
+                "status": "failed",
+                "error": "Seed phrase is not configured"
+            }
+            
+        # Используем новый механизм с circuit breaker и retry
+        return await self._make_api_call(
+            lambda: self.client.buy_premium_without_kyc(
                 username=username,
                 duration=duration,
                 seed=self.seed_phrase
             )
-            return {
-                "status": "success",
-                "result": result
-            }
-        except Exception as e:
-            self.logger.error(f"Error buying premium without KYC from Fragment API for {username}: {e}")
-            return {
-                "status": "failed",
-                "error": str(e)
-            }
+        )
 
     async def buy_premium(self, username: str, duration: int, show_sender: bool = False) -> Dict[str, Any]:
         """Покупка Telegram Premium (с KYC)"""
-        try:
-            if not self.seed_phrase:
-                return {
-                    "status": "failed",
-                    "error": "Seed phrase is not configured"
-                }
-                
-            if not self.fragment_cookies:
-                return {
-                    "status": "failed",
-                    "error": "Fragment cookies are not configured"
-                }
-                
-            result = self.client.buy_premium(
+        if not self.seed_phrase:
+            return {
+                "status": "failed",
+                "error": "Seed phrase is not configured"
+            }
+            
+        if not self.fragment_cookies:
+            return {
+                "status": "failed",
+                "error": "Fragment cookies are not configured"
+            }
+            
+        # Используем новый механизм с circuit breaker и retry
+        return await self._make_api_call(
+            lambda: self.client.buy_premium(
                 username=username,
                 duration=duration,
                 show_sender=show_sender,
                 fragment_cookies=self.fragment_cookies,
                 seed=self.seed_phrase
             )
-            return {
-                "status": "success",
-                "result": result
-            }
-        except Exception as e:
-            self.logger.error(f"Error buying premium from Fragment API for {username}: {e}")
-            return {
-                "status": "failed",
-                "error": str(e)
-            }
+        )
