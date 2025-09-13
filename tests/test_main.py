@@ -117,7 +117,8 @@ class TestMainApp:
     @pytest.mark.asyncio
     async def test_init_cache_services_redis_error(self, mock_settings):
         """Тест инициализации кэш-сервисов с ошибкой Redis"""
-        with patch('redis.asyncio.from_url') as mock_from_url:
+        with patch('redis.asyncio.from_url') as mock_from_url, \
+             patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
             mock_client = AsyncMock()
             mock_from_url.return_value = mock_client
             mock_client.ping = AsyncMock(side_effect=Exception("Redis error"))

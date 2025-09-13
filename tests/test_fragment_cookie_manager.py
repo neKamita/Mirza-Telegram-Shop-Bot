@@ -373,18 +373,19 @@ class TestFragmentCookieManager:
         mock_driver = Mock()
         mock_driver.get.side_effect = Exception("Timeout")
         
-        # Мокаем Remote driver fallback к Chrome
+        # Remote должен упасть, и нет fallback к Chrome (CHROMEDRIVER_PY_AVAILABLE = False по умолчанию)
         mock_webdriver.Remote.side_effect = Exception("Remote failed")
-        mock_webdriver.Chrome.return_value = mock_driver
         
         # Act
         result = await cookie_manager._refresh_cookies()
         
         # Assert
         assert result is None
-        # Ожидаем два вызова error: Remote driver и timeout
+        # Проверяем что Remote был вызван и упал
+        mock_webdriver.Remote.assert_called_once()
+        # Проверяем логирование ошибки
         assert cookie_manager.logger.error.call_count >= 1
-        mock_driver.quit.assert_called_once()
+        # В данном сценарии driver не создается, поэтому quit не вызывается
 
     @pytest.mark.asyncio
     async def test_validate_cookies_success(self, cookie_manager, mock_fragment_service):

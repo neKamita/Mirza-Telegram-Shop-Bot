@@ -190,7 +190,9 @@ class TestPaymentServiceComprehensive:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=None)
         
-        with patch('aiohttp.ClientSession', return_value=mock_session):
+        # Мокаем asyncio.sleep чтобы избежать реальных задержек в retry логике
+        with patch('aiohttp.ClientSession', return_value=mock_session), \
+             patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
             result = await payment_service.create_invoice(amount, currency, order_id)
             
             # Проверяем, что вернулась ошибка (может быть либо Timeout либо Circuit Breaker OPEN)
