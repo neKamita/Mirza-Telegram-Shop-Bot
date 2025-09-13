@@ -20,9 +20,12 @@ try:
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.common.exceptions import TimeoutException, WebDriverException
-    from chromedriver_py import binary_path
     SELENIUM_AVAILABLE = True
-    CHROMEDRIVER_PY_AVAILABLE = True
+    try:
+        from chromedriver_py import binary_path
+        CHROMEDRIVER_PY_AVAILABLE = True
+    except ImportError:
+        CHROMEDRIVER_PY_AVAILABLE = False
 except ImportError:
     SELENIUM_AVAILABLE = False
     CHROMEDRIVER_PY_AVAILABLE = False
@@ -115,44 +118,45 @@ class FragmentCookieManager:
         try:
             self.logger.info("Refreshing Fragment cookies...")
             
-            # Настройка headless браузера
-            if not SELENIUM_AVAILABLE:
-                self.logger.error("Selenium not available")
-                return None
-
+            # Настройка Chrome опций для Docker Selenium
             chrome_options = webdriver.ChromeOptions()
             chrome_options.add_argument("--headless")
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--disable-extensions")
+            chrome_options.add_argument("--disable-web-security")
+            chrome_options.add_argument("--allow-running-insecure-content")
             chrome_options.add_argument("--window-size=1920,1080")
+            chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-            # Используем удаленный Selenium сервер
+            # Приоритет: Docker Selenium сервер
             selenium_host = os.getenv("SELENIUM_HOST", "selenium-chrome")
             selenium_port = os.getenv("SELENIUM_PORT", "4444")
             selenium_url = f"http://{selenium_host}:{selenium_port}/wd/hub"
             
+            driver = None
             try:
-                # Удаленный драйвер с headless режимом
+                # Подключение к Docker Selenium
                 driver = webdriver.Remote(
                     command_executor=selenium_url,
                     options=chrome_options
                 )
-                self.logger.info(f"Connected to remote Selenium server at {selenium_url}")
+                self.logger.info(f"Successfully connected to Docker Selenium at {selenium_url}")
             except Exception as e:
-                self.logger.error(f"Failed to connect to remote Selenium server: {e}")
-                # Fallback: попытка использовать локальный chromedriver если удаленный недоступен
-                try:
-                    if CHROMEDRIVER_PY_AVAILABLE and binary_path:
+                self.logger.error(f"Failed to connect to Docker Selenium server: {e}")
+                
+                # Fallback только если Docker Selenium недоступен
+                if CHROMEDRIVER_PY_AVAILABLE:
+                    try:
                         service = ChromeService(executable_path=binary_path)
                         driver = webdriver.Chrome(service=service, options=chrome_options)
-                    else:
-                        driver_path = os.getenv("CHROMEDRIVER_PATH", "/usr/local/bin/chromedriver")
-                        service = ChromeService(executable_path=driver_path)
-                        driver = webdriver.Chrome(service=service, options=chrome_options)
-                    self.logger.warning("Using local Chrome driver as fallback")
-                except Exception as fallback_error:
-                    self.logger.error(f"Failed to create local Chrome driver: {fallback_error}")
+                        self.logger.warning("Using local chromedriver-py as fallback")
+                    except Exception as fallback_error:
+                        self.logger.error(f"Local chromedriver-py fallback failed: {fallback_error}")
+                
+                if not driver:
+                    self.logger.error("No working WebDriver found")
                     return None
 
             try:
