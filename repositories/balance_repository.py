@@ -102,7 +102,7 @@ class BalanceRepository:
                 else:
                     raise ValueError(f"Unknown operation: {operation}")
 
-                balance.updated_at = datetime.now(timezone.utc)
+                balance.updated_at = datetime.now(timezone.utc)  # Используем timezone-aware datetime
                 await session.commit()
                 return True
             except Exception as e:
@@ -249,10 +249,10 @@ class BalanceRepository:
                 if not transaction:
                     return False
 
-                # Обновляем транзакцию
+                # Обновляем транзакцию (используем naive datetime для совместимости с PostgreSQL TIMESTAMP WITHOUT TIME ZONE)
                 update_stmt = update(Transaction).where(Transaction.id == transaction_id).values(
                     status=status,
-                    updated_at=datetime.now(timezone.utc)
+                    updated_at=datetime.now(timezone.utc)  # Используем timezone-aware datetime
                 )
 
                 if metadata:

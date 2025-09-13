@@ -10,7 +10,7 @@ from core.interfaces import DatabaseInterface
 from sqlalchemy import Column, Integer, Boolean, DateTime, String, Numeric, ForeignKey, Enum
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship, Mapped, mapped_column
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum as PyEnum
 from decimal import Decimal
 from config.settings import settings
@@ -59,8 +59,8 @@ class Balance(Base):
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=0.0)  # Баланс в виде числа с плавающей точкой
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="TON")    # Валюта (TON, USD и т.д.)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Связь с пользователем
     user = relationship("User", back_populates="balances")
@@ -82,8 +82,8 @@ class Transaction(Base):
     description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Описание транзакции
     external_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, unique=True, index=True)  # ID внешней системы (Heleket)
     transaction_metadata: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)  # Дополнительные данные в JSON формате
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Связь с пользователем
     user = relationship("User", back_populates="transactions")
@@ -280,7 +280,7 @@ class UserRepository(DatabaseInterface):
                 else:
                     raise ValueError(f"Unknown operation: {operation}")
 
-                balance.updated_at = datetime.utcnow()
+                balance.updated_at = datetime.now(timezone.utc)
                 await session.commit()
 
                 # Инвалидируем кеш пользователя
@@ -411,7 +411,7 @@ class UserRepository(DatabaseInterface):
                     return False
 
                 transaction.status = status
-                transaction.updated_at = datetime.utcnow()
+                transaction.updated_at = datetime.now(timezone.utc)
 
                 if metadata:
                     transaction.transaction_metadata = json.dumps(metadata)

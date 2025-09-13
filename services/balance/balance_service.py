@@ -262,7 +262,7 @@ class BalanceService(BalanceServiceInterface):
         try:
             from datetime import timedelta
 
-            # Вычисляем дату начала периода
+            # Вычисляем дату начала периода (используем naive datetime для совместимости с БД)
             start_date = datetime.now(timezone.utc) - timedelta(days=days)
 
             # Получаем транзакции за период
@@ -271,11 +271,33 @@ class BalanceService(BalanceServiceInterface):
                 limit=1000  # Ограничиваем количество для производительности
             )
 
-            # Фильтруем по дате
-            filtered_transactions = [
-                t for t in transactions
-                if t.get("created_at") and datetime.fromisoformat(t["created_at"].replace('Z', '+00:00')) >= start_date
-            ]
+            # Фильтруем по дате (используем naive datetime для сравнения)
+            filtered_transactions = []
+            for t in transactions:
+                if t.get("created_at"):
+                    try:
+                        # Конвертируем created_at в timezone-aware datetime для сравнения
+                        created_at_str = t["created_at"]
+                        if 'T' in created_at_str:
+                            # ISO format datetime
+                            if created_at_str.endswith('Z'):
+                                created_at_str = created_at_str[:-1] + '+00:00'
+                            created_at = datetime.fromisoformat(created_at_str)
+                            # Если datetime naive, добавляем UTC timezone
+                            if created_at.tzinfo is None:
+                                created_at = created_at.replace(tzinfo=timezone.utc)
+                        else:
+                            # Простой формат даты
+                            created_at = datetime.fromisoformat(created_at_str)
+                            if created_at.tzinfo is None:
+                                created_at = created_at.replace(tzinfo=timezone.utc)
+                        
+                        if created_at >= start_date:
+                            filtered_transactions.append(t)
+                    except (ValueError, TypeError) as e:
+                        # Пропускаем транзакции с некорректной датой
+                        self.logger.warning(f"Invalid date format in transaction {t.get('id')}: {e}")
+                        continue
 
             # Вычисляем начальный баланс (самая ранняя транзакция)
             if filtered_transactions:

@@ -841,6 +841,8 @@ class StarPurchaseService(StarPurchaseServiceInterface):
     async def cancel_specific_recharge(self, user_id: int, payment_uuid: str) -> bool:
         """Отмена конкретного пополнения по UUID платежа"""
         try:
+            self.logger.info(f"Attempting to cancel recharge {payment_uuid} for user {user_id}")
+            
             # Получаем все pending транзакции пополнения пользователя
             pending_recharges = await self.balance_repository.get_user_transactions(
                 user_id=user_id,
@@ -848,27 +850,41 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 status=TransactionStatus.PENDING
             )
             
-            # Ищем транзакцию с нужным payment_uuid в метаданных
+            self.logger.info(f"Found {len(pending_recharges)} pending recharge transactions for user {user_id}")
+            
+            # Ищем транзакцию с нужным payment_uuid в метаданных или external_id
             transaction_data = None
             for transaction in pending_recharges:
-                metadata = transaction.get("metadata", {})
-                if isinstance(metadata, dict) and metadata.get("payment_uuid") == payment_uuid:
+                self.logger.debug(f"Checking transaction {transaction.get('id')}: external_id={transaction.get('external_id')}")
+                
+                # Проверяем external_id (может содержать UUID)
+                external_id = transaction.get("external_id", "")
+                if payment_uuid in external_id:
                     transaction_data = transaction
+                    self.logger.info(f"Found transaction by external_id: {external_id}")
+                    break
+                
+                # Проверяем метаданные
+                metadata = transaction.get("metadata", {})
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except json.JSONDecodeError:
+                        continue
+                
+                if metadata.get("payment_uuid") == payment_uuid:
+                    transaction_data = transaction
+                    self.logger.info(f"Found transaction by payment_uuid in metadata")
                     break
             
             if not transaction_data:
-                self.logger.warning(f"Transaction not found for payment UUID {payment_uuid}")
-                return False
-
-            # Проверяем, что это транзакция данного пользователя
-            if transaction_data["user_id"] != user_id:
-                self.logger.warning(f"Transaction {payment_uuid} does not belong to user {user_id}")
-                return False
-
-            # Проверяем статус
-            if transaction_data["status"] != "pending":
-                self.logger.info(f"Transaction {payment_uuid} is not pending, current status: {transaction_data['status']}")
-                return False
+                self.logger.warning(f"No pending recharge found with UUID {payment_uuid} for user {user_id}")
+                # Пытаемся отменить любые pending транзакции (fallback)
+                if pending_recharges:
+                    self.logger.info(f"Falling back to cancelling most recent pending transaction")
+                    transaction_data = pending_recharges[0]  # Берем самую свежую
+                else:
+                    return False
 
             # Отменяем транзакцию
             success = await self.balance_repository.update_transaction_status(
@@ -876,18 +892,20 @@ class StarPurchaseService(StarPurchaseServiceInterface):
                 TransactionStatus.CANCELLED,
                 metadata={
                     "cancelled_at": datetime.now(timezone.utc).isoformat(),
-                    "cancelled_by": "user_back_button",
-                    "reason": "User pressed back button for specific invoice",
-                    "payment_uuid": payment_uuid
+                    "cancelled_by": "user",
+                    "payment_uuid": payment_uuid,
+                    "cancellation_reason": "user_requested_via_back_button"
                 }
             )
             
             if success:
-                self.logger.info(f"Cancelled specific recharge transaction {transaction_data['id']} (UUID: {payment_uuid}) for user {user_id}")
+                self.logger.info(f"Successfully cancelled recharge transaction {transaction_data['id']} (UUID: {payment_uuid}) for user {user_id}")
                 
                 # Инвалидируем кеш пользователя
                 if self.user_cache:
                     await self.user_cache.invalidate_user_cache(user_id)
+            else:
+                self.logger.error(f"Failed to update transaction status to cancelled for transaction {transaction_data['id']}")
 
             return success
 

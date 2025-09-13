@@ -21,14 +21,8 @@ try:
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.common.exceptions import TimeoutException, WebDriverException
     SELENIUM_AVAILABLE = True
-    try:
-        from chromedriver_py import binary_path
-        CHROMEDRIVER_PY_AVAILABLE = True
-    except ImportError:
-        CHROMEDRIVER_PY_AVAILABLE = False
 except ImportError:
     SELENIUM_AVAILABLE = False
-    CHROMEDRIVER_PY_AVAILABLE = False
     logging.warning("Selenium not available, automatic cookie refresh will be disabled")
 
 
@@ -137,27 +131,16 @@ class FragmentCookieManager:
             
             driver = None
             try:
-                # Подключение к Docker Selenium
+                # Подключение к Docker Selenium (основной и единственный метод)
                 driver = webdriver.Remote(
                     command_executor=selenium_url,
                     options=chrome_options
                 )
                 self.logger.info(f"Successfully connected to Docker Selenium at {selenium_url}")
             except Exception as e:
-                self.logger.error(f"Failed to connect to Docker Selenium server: {e}")
-                
-                # Fallback только если Docker Selenium недоступен
-                if CHROMEDRIVER_PY_AVAILABLE:
-                    try:
-                        service = ChromeService(executable_path=binary_path)
-                        driver = webdriver.Chrome(service=service, options=chrome_options)
-                        self.logger.warning("Using local chromedriver-py as fallback")
-                    except Exception as fallback_error:
-                        self.logger.error(f"Local chromedriver-py fallback failed: {fallback_error}")
-                
-                if not driver:
-                    self.logger.error("No working WebDriver found")
-                    return None
+                self.logger.error(f"Failed to connect to Docker Selenium server at {selenium_url}: {e}")
+                self.logger.error("Docker Selenium is the only supported WebDriver method. Ensure selenium-chrome service is running.")
+                return None
 
             try:
                 # Переходим на страницу Fragment

@@ -73,7 +73,7 @@ def run_migrations_online() -> None:
         raise ValueError("DATABASE_URL environment variable is not set")
 
     # Convert asyncpg URL to psycopg2 for migrations
-    sync_url = url.replace("postgresql+asyncpg", "postgresql")
+    sync_url = url.replace("postgresql+asyncpg", "postgresql+psycopg2")
 
     configuration = config.get_section(config.config_ini_section, {})
     configuration["sqlalchemy.url"] = sync_url

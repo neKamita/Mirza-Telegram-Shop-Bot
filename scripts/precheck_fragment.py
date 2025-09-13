@@ -75,30 +75,37 @@ def check_auto_refresh_setting() -> bool:
     return True
 
 
-def check_chrome_driver() -> bool:
-    """Проверка наличия ChromeDriver"""
-    driver_path = os.getenv("CHROMEDRIVER_PATH", "/usr/local/bin/chromedriver")
-    if os.path.exists(driver_path):
-        print("✅ ChromeDriver найден")
+def check_docker_selenium() -> bool:
+    """Проверка подключения к Docker Selenium"""
+    try:
+        from selenium import webdriver
+        
+        selenium_host = os.getenv("SELENIUM_HOST", "selenium-chrome")
+        selenium_port = os.getenv("SELENIUM_PORT", "4444")
+        selenium_url = f"http://{selenium_host}:{selenium_port}/wd/hub"
+        
+        # Настройка минимальных опций для проверки
+        chrome_options = webdriver.ChromeOptions()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        
+        # Пробуем подключиться к Docker Selenium
+        driver = webdriver.Remote(
+            command_executor=selenium_url,
+            options=chrome_options
+        )
+        
+        # Если подключение успешно, закрываем и возвращаем True
+        driver.quit()
+        print(f"✅ Docker Selenium доступен на {selenium_url}")
         return True
-    else:
-        # Проверяем, установлен ли chromedriver-py
-        try:
-            import chromedriver_py  # type: ignore  # cspell:ignore chromedriver_py
-            # Получаем путь к chromedriver из chromedriver-py
-            auto_driver_path = chromedriver_py.binary_path
-            if os.path.exists(auto_driver_path):
-                print("✅ ChromeDriver доступен через chromedriver-py")
-                return True
-            else:
-                print("⚠️  ChromeDriver не найден по пути:", driver_path)
-                print("💡 Это может повлиять на автоматическое обновление cookies")
-                return False
-        except ImportError:
-            print("⚠️  ChromeDriver не найден по пути:", driver_path)
-            print("💡 Установите chromedriver-py или укажите правильный путь в CHROMEDRIVER_PATH")
-            print("💡 Это может повлиять на автоматическое обновление cookies")
-            return False
+        
+    except Exception as e:
+        print(f"⚠️  Docker Selenium недоступен: {e}")
+        print("💡 Убедитесь что selenium-chrome сервис запущен")
+        print("💡 Это может повлиять на автоматическое обновление cookies")
+        return False
 
 
 def check_environment_variables() -> bool:
@@ -123,8 +130,8 @@ def check_environment_variables() -> bool:
     if not check_auto_refresh_setting():
         all_checks_passed = False
     
-    # Проверка ChromeDriver
-    if not check_chrome_driver():
+    # Проверка Docker Selenium
+    if not check_docker_selenium():
         # Это не критично для запуска, но предупреждаем
         pass
     
