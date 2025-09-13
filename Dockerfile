@@ -11,17 +11,19 @@ RUN apk add --no-cache --virtual .build-deps \
     openssl-dev \
     curl \
     cargo \
+    wget \
     && apk add --no-cache \
     ca-certificates
 
-# Установка uv для быстрой установки Python зависимостей
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    mv /root/.local/bin/uv /usr/local/bin/uv
+# Установка uv напрямую через статический бинарник - СУПЕР БЫСТРО
+RUN wget -qO- https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-musl.tar.gz | \
+    tar -xzf - -C /usr/local/bin --strip-components=1 uv-x86_64-unknown-linux-musl/uv && \
+    chmod +x /usr/local/bin/uv
 
-# Установка Python зависимостей
+# Установка Python зависимостей только через uv - МАКСИМАЛЬНАЯ СКОРОСТЬ
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/uv \
-    /usr/local/bin/uv pip install --system --compile -r requirements.txt
+    uv pip install --system --compile -r requirements.txt
 
 # Удаляем build dependencies чтобы уменьшить размер
 RUN apk del .build-deps

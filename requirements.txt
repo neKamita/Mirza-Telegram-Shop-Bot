@@ -59,3 +59,9 @@ structlog>=23.2.0
 
 # System monitoring
 psutil>=5.9.0
+
+# Testing
+pytest>=8.3.4
+pytest-asyncio>=0.22.0
+pytest-cov>=4.1.0
+pytest-env>=0.6.2
