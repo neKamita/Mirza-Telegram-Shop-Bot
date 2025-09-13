@@ -7,7 +7,8 @@ check_node() {
     local host=$1
     local port=$2
     echo "Testing connection to $host:$port..."
-    if ! timeout 5 redis-cli -h "$host" -p "$port" -a "${REDIS_PASSWORD}" ping >/dev/null 2>&1; then
+    # Увеличиваем таймаут для Docker сети
+    if ! timeout 10 redis-cli -h "$host" -p "$port" -a "${REDIS_PASSWORD}" ping >/dev/null 2>&1; then
         echo "Failed to connect to $host:$port"
         return 1
     fi

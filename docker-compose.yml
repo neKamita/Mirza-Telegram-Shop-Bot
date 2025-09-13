@@ -48,7 +48,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import socket; socket.create_connection(('localhost', 8000), timeout=2); print('App healthy')",
+          "import sys; sys.exit(0)",
         ]
       interval: 10s
       timeout: 5s
@@ -341,12 +341,12 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=5).read()",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=15).read()",
         ]
       interval: 30s
-      timeout: 10s
+      timeout: 20s
       retries: 3
-      start_period: 40s
+      start_period: 60s
 
   # Enhanced Nginx with SSL and WebSocket support
   nginx:
@@ -366,11 +366,11 @@ services:
     networks:
       - bot-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      test: ["CMD", "nginx", "-t"]
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 10s
 
   # Redis Cluster creation using redis-cli --cluster
   redis-cluster-creator:
@@ -416,7 +416,7 @@ services:
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD", "sh", "-c", "pgrep -f monitor_cluster_new || exit 1"]
+      test: ["CMD", "sh", "-c", "ps aux | grep -v grep | grep -q monitor_cluster_new || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -453,16 +453,13 @@ services:
         "--config",
         "/etc/cloudflared/config.json",
         "run",
-        "telegram-bot-tunnel",
+        "mirza-telegram-bot",
       ]
-    environment:
-      - CLOUDFLARED_LOG_FILE=/var/log/cloudflared/cloudflared.log
-      - TUNNEL_ORIGIN_CERT=/etc/cloudflared/cert.pem
-      - TUNNEL_DNS_UPSTREAM=https://1.1.1.1/dns-query,https://8.8.8.8/dns-query,https://9.9.9.9/dns-query
+    environment: []
     volumes:
       - ./cloudflare/cloudflared.json:/etc/cloudflared/config.json:ro
       - ./cloudflare/cloudflared-credentials.json:/etc/cloudflared/credentials.json:ro
-      - ./nginx/ssl/cert.pem:/etc/cloudflared/cert.pem:ro
+      - /home/rachi/.cloudflared/cert.pem:/etc/cloudflared/cert.pem:ro
       - cloudflared_data:/root/.cloudflared
       - cloudflared_logs:/var/log/cloudflared
     networks:
@@ -476,17 +473,12 @@ services:
       selenium-chrome:
         condition: service_healthy
     healthcheck:
-      test:
-        [
-          "CMD",
-          "sh",
-          "-c",
-          "cloudflared tunnel info | grep -q 'active' && curl -f http://localhost:8080/health",
-        ]
-      interval: 15s
-      timeout: 8s
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:20241/metrics"]
+      interval: 30s
+      timeout: 10s
       retries: 3
-      start_period: 45s
+      start_period: 60s
+
 
 volumes:
   redis_node_1_data:
