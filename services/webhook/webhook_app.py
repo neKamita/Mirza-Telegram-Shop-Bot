@@ -245,10 +245,68 @@ async def initialize_services():
         user_repository = UserRepository(database_url=settings.database_url)
         await user_repository.create_tables()
 
-        # Инициализация Redis кеша
+        # Инициализация Redis кеша с retry логикой
         redis_client = None
         user_cache = None
         payment_cache = None
+
+        async def connect_redis_webhook_retry(max_retries=10, base_delay=2):
+            """Подключение к Redis с retry логикой для webhook"""
+            import redis.asyncio as redis
+            from redis.cluster import RedisCluster, ClusterNode
+            import asyncio
+            
+            last_exception = None
+            
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"Redis webhook connection attempt {attempt + 1}/{max_retries}")
+                    
+                    if settings.is_redis_cluster:
+                        logger.info(f"Creating RedisCluster with nodes: {settings.redis_cluster_nodes}")
+                        startup_nodes = [
+                            ClusterNode(host.split(":")[0], int(host.split(":")[1]))
+                            for host in settings.redis_cluster_nodes.split(",")
+                        ]
+
+                        redis_client = RedisCluster(
+                            startup_nodes=startup_nodes,
+                            password=settings.redis_password,
+                            decode_responses=False,
+                            skip_full_coverage_check=True,
+                            health_check_interval=30,
+                            socket_connect_timeout=5,
+                            socket_timeout=5
+                        )
+                    else:
+                        logger.info(f"Creating Redis client from URL: {settings.redis_url}")
+                        redis_client = redis.from_url(settings.redis_url, decode_responses=False)
+
+                    # Проверка подключения
+                    if settings.is_redis_cluster:
+                        # Для RedisCluster ping() возвращает bool, а не корутину
+                        ping_result = redis_client.ping()
+                        logger.info(f"Redis cluster ping successful: {ping_result}")
+                    else:
+                        # Для обычного Redis ping() возвращает корутину
+                        ping_result = await redis_client.ping()
+                        logger.info(f"Redis ping successful: {ping_result}")
+
+                    logger.info(f"Redis webhook connection successful on attempt {attempt + 1}")
+                    return redis_client
+
+                except Exception as e:
+                    last_exception = e
+                    delay = base_delay * (2 ** attempt)  # Экспоненциальная задержка
+                    logger.warning(f"Redis webhook connection attempt {attempt + 1} failed: {e}")
+                    
+                    if attempt < max_retries - 1:
+                        logger.info(f"Retrying in {delay} seconds...")
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.error(f"All Redis webhook connection attempts failed. Last error: {e}")
+                        
+            raise last_exception
 
         if settings.redis_url:
             logger.info("Starting Redis initialization process", extra={
@@ -258,54 +316,21 @@ async def initialize_services():
             })
 
             try:
-                logger.info("Step 1: Importing Redis modules")
-                import redis.asyncio as redis
-                from redis.cluster import RedisCluster
-                logger.info("Step 1 completed: Redis modules imported")
+                # Попытка подключения с retry логикой
+                redis_client = await connect_redis_webhook_retry()
 
-                if settings.is_redis_cluster:
-                    logger.info("Step 2: Creating Redis cluster client")
-                    from redis.cluster import ClusterNode
-                    startup_nodes = [
-                        ClusterNode(host.split(":")[0], int(host.split(":")[1]))
-                        for host in settings.redis_cluster_nodes.split(",")
-                    ]
-                    logger.info("Step 2a: Created startup nodes", extra={"startup_nodes": [(n.host, n.port) for n in startup_nodes]})
-
-                    redis_client = RedisCluster(
-                        startup_nodes=startup_nodes,
-                        password=settings.redis_password,
-                        decode_responses=False,
-                        skip_full_coverage_check=True
-                    )
-                    logger.info("Step 2 completed: RedisCluster client created")
-                else:
-                    logger.info("Step 3: Creating Redis client from URL")
-                    redis_client = redis.from_url(settings.redis_url, decode_responses=False)
-                    logger.info("Step 3 completed: Redis client created")
-
-                logger.info("Step 4: Testing Redis connection with ping")
-                if settings.is_redis_cluster:
-                    # Для RedisCluster ping() возвращает bool, а не корутину
-                    ping_result = redis_client.ping()
-                    logger.info("Step 4 completed: Redis ping successful", extra={"ping_result": ping_result})
-                else:
-                    # Для обычного Redis ping() возвращает корутину
-                    ping_result = await redis_client.ping()
-                    logger.info("Step 4 completed: Redis ping successful", extra={"ping_result": ping_result})
-
-                logger.info("Step 5: Creating UserCache instance")
+                logger.info("Creating UserCache instance")
                 user_cache = UserCache(redis_client)
-                logger.info("Step 5 completed: UserCache created successfully")
+                logger.info("UserCache created successfully")
 
-                logger.info("Step 6: Creating PaymentCache instance")
+                logger.info("Creating PaymentCache instance")
                 payment_cache = PaymentCache(redis_client)
-                logger.info("Step 6 completed: PaymentCache created successfully")
+                logger.info("PaymentCache created successfully")
 
                 logger.info("Redis cache initialization completed successfully")
 
             except Exception as e:
-                logger.error("Redis initialization failed", extra={
+                logger.error("Redis initialization failed after all retries", extra={
                     "error": str(e),
                     "error_type": type(e).__name__,
                     "redis_url": settings.redis_url,
@@ -313,7 +338,6 @@ async def initialize_services():
                 })
                 import traceback
                 logger.error("Full Redis initialization traceback", extra={"traceback": traceback.format_exc()})
-                # Don't re-raise, continue with other services
                 logger.warning("Continuing without Redis cache - using graceful degradation")
                 redis_client = None
                 user_cache = None
